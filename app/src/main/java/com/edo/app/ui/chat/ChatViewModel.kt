@@ -1,0 +1,358 @@
+package com.edo.app.ui.chat
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.edo.app.AppContainer
+import com.edo.app.agent.Agent
+import com.edo.app.agent.ApprovalDecision
+import com.edo.app.agent.ApprovalGate
+import com.edo.app.agent.GrepTool
+import com.edo.app.agent.HttpRequestTool
+import com.edo.app.agent.KtorHttpFetcher
+import com.edo.app.agent.LsTool
+import com.edo.app.agent.ReadFileTool
+import com.edo.app.agent.FileWorkspace
+import com.edo.app.agent.SafWorkspace
+import com.edo.app.agent.ToolRegistry
+import com.edo.app.agent.WriteFileTool
+import com.edo.app.agent.AgentEvent
+import com.edo.app.data.MessageEntity
+import com.edo.app.data.ProjectEntity
+import com.edo.app.data.Provider
+import com.edo.app.data.ThreadEntity
+import com.edo.app.llm.AnthropicClient
+import com.edo.app.llm.Block
+import com.edo.app.llm.ConvMessage
+import com.edo.app.llm.LlmClient
+import com.edo.app.llm.OpenAIClient
+import com.edo.app.llm.Role
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+
+data class PendingApproval(
+    val id: String,
+    val toolName: String,
+    val argsJson: String,
+    val deferred: CompletableDeferred<ApprovalDecision>,
+)
+
+data class UiMessage(
+    val id: Long,
+    val role: Role,
+    val blocks: List<Block>,
+)
+
+data class PendingToolUi(
+    val id: String,
+    val name: String,
+    val argsJson: String,
+    val approved: Boolean? = null,
+    val result: String? = null,
+    val isError: Boolean = false,
+)
+
+data class ChatUiState(
+    val currentProject: ProjectEntity? = null,
+    val currentThread: ThreadEntity? = null,
+    val messages: List<UiMessage> = emptyList(),
+    val streamingText: String = "",
+    val pendingToolCalls: Map<String, PendingToolUi> = emptyMap(),
+    val approval: PendingApproval? = null,
+    val running: Boolean = false,
+    val error: String? = null,
+    val needsProject: Boolean = false,
+)
+
+class ChatViewModel(app: Application, private val container: AppContainer) : AndroidViewModel(app) {
+
+    private val _state = MutableStateFlow(ChatUiState())
+    val state: StateFlow<ChatUiState> = _state.asStateFlow()
+
+    private val conversation = mutableListOf<ConvMessage>()
+    private var persistedCount = 0
+    private var agentJob: Job? = null
+    private var titleSet = false
+
+    private var loadedProjectId: Long = -2L
+    private var loadedThreadId: Long = -2L
+
+    init {
+        viewModelScope.launch {
+            combine(container.activeProjectId, container.activeThreadId) { p, t -> p to t }
+                .collectLatest { (projectId, threadId) ->
+                    // Skip if nothing actually changed — guards against re-emitting when
+                    // sendUserMessage calls setActiveThread for a freshly created thread.
+                    if (projectId == loadedProjectId && threadId == loadedThreadId) return@collectLatest
+                    val projectChanged = projectId != loadedProjectId
+                    loadedProjectId = projectId
+                    loadedThreadId = threadId
+                    if (projectChanged || threadId != _state.value.currentThread?.id) {
+                        agentJob?.cancel()
+                        agentJob = null
+                    }
+                    titleSet = false
+                    val project = if (projectId > 0) container.db.projects().getById(projectId) else null
+                    when {
+                        project == null -> {
+                            conversation.clear()
+                            persistedCount = 0
+                            _state.value = ChatUiState(needsProject = true)
+                        }
+                        threadId <= 0 -> {
+                            conversation.clear()
+                            persistedCount = 0
+                            _state.value = ChatUiState(currentProject = project)
+                        }
+                        else -> loadThread(projectId, threadId)
+                    }
+                }
+        }
+    }
+
+    /** Marks the given (project, thread) as already loaded, so the next combine emission for these IDs is a no-op. */
+    private fun markLoaded(projectId: Long, threadId: Long) {
+        loadedProjectId = projectId
+        loadedThreadId = threadId
+    }
+
+    private suspend fun loadThread(projectId: Long, threadId: Long) {
+        val project = container.db.projects().getById(projectId) ?: return
+        val thread = container.db.threads().getById(threadId)
+        if (thread == null || thread.projectId != projectId) {
+            conversation.clear()
+            persistedCount = 0
+            _state.value = ChatUiState(currentProject = project)
+            return
+        }
+        val rows = container.db.messages().listForThread(threadId)
+        conversation.clear()
+        val loaded = rows.mapNotNull { rowToUi(it) }
+        for (m in loaded) conversation.add(ConvMessage(m.role, m.blocks))
+        persistedCount = conversation.size
+        titleSet = thread.title != "New chat" && rows.isNotEmpty()
+        val visible = loaded.filter { it.role != Role.User || it.blocks.any { b -> b !is Block.ToolResult } }
+        _state.value = ChatUiState(currentProject = project, currentThread = thread, messages = visible)
+    }
+
+    /** Clear active thread to show empty "new chat" state. A new ThreadEntity is created on first send. */
+    fun newChat() {
+        agentJob?.cancel()
+        agentJob = null
+        container.setActiveThread(-1L)
+    }
+
+    fun sendUserMessage(text: String, image: Pair<String, String>? = null) {
+        if (text.isBlank() && image == null) return
+        val projectId = container.activeProjectId.value.takeIf { it > 0 } ?: return
+        val blocks = mutableListOf<Block>()
+        if (image != null) blocks.add(Block.Image(image.first, image.second))
+        if (text.isNotBlank()) blocks.add(Block.Text(text))
+        val convMsg = ConvMessage(Role.User, blocks)
+        conversation.add(convMsg)
+        agentJob = viewModelScope.launch {
+            // Create thread if none active
+            var threadId = container.activeThreadId.value
+            if (threadId <= 0) {
+                val newTitle = text.ifBlank { "Image message" }.take(48)
+                val now = System.currentTimeMillis()
+                threadId = container.db.threads().insert(
+                    ThreadEntity(projectId = projectId, title = newTitle, createdAt = now, lastUpdatedAt = now)
+                )
+                titleSet = true
+                // Mark before setActiveThread so the combine emission is a no-op
+                markLoaded(projectId, threadId)
+                container.setActiveThread(threadId)
+                val thread = container.db.threads().getById(threadId)
+                _state.update { it.copy(currentThread = thread) }
+            } else if (!titleSet && text.isNotBlank()) {
+                val newTitle = text.take(48)
+                container.db.threads().updateTitleAndTimestamp(threadId, newTitle, System.currentTimeMillis())
+                titleSet = true
+                val thread = container.db.threads().getById(threadId)
+                _state.update { it.copy(currentThread = thread) }
+            } else {
+                container.db.threads().touch(threadId)
+            }
+            val rowId = container.db.messages().insert(uiToRow(convMsg, threadId))
+            persistedCount = conversation.size
+            _state.update {
+                it.copy(messages = it.messages + UiMessage(rowId, Role.User, blocks))
+            }
+            runAgent(threadId)
+        }
+    }
+
+    fun approve(decision: ApprovalDecision) {
+        _state.value.approval?.deferred?.complete(decision)
+    }
+
+    fun dismissError() = _state.update { it.copy(error = null) }
+
+    private suspend fun runAgent(threadId: Long) {
+        val projectId = container.activeProjectId.value.takeIf { it > 0 } ?: run {
+            _state.update { it.copy(error = "No project selected.") }
+            return
+        }
+        val project = container.db.projects().getById(projectId) ?: run {
+            _state.update { it.copy(error = "Project not found.") }
+            return
+        }
+        val settings = container.settings.load()
+        if (settings.apiKey.isBlank()) {
+            _state.update { it.copy(error = "Add your API key in Settings.") }
+            return
+        }
+        val ws = if (project.workspaceUri.startsWith("content://")) {
+            SafWorkspace(getApplication(), android.net.Uri.parse(project.workspaceUri))
+        } else {
+            FileWorkspace(java.io.File(project.workspaceUri))
+        }
+        val tools = ToolRegistry(
+            listOf(
+                ReadFileTool(ws),
+                WriteFileTool(ws),
+                LsTool(ws),
+                GrepTool(ws),
+                HttpRequestTool(KtorHttpFetcher(container.http)),
+            )
+        )
+        val llm: LlmClient = when (settings.provider) {
+            Provider.Anthropic -> AnthropicClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
+            Provider.OpenAI -> OpenAIClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
+        }
+        val yolo = settings.yoloMode
+        val gate = ApprovalGate { name, argsJson ->
+            if (yolo) {
+                ApprovalDecision.AllowOnce
+            } else {
+                val deferred = CompletableDeferred<ApprovalDecision>()
+                val pendingId = "${name}_${System.currentTimeMillis()}"
+                _state.update { it.copy(approval = PendingApproval(pendingId, name, argsJson, deferred)) }
+                try { deferred.await() } finally {
+                    _state.update { it.copy(approval = null) }
+                }
+            }
+        }
+        _state.update { it.copy(running = true, error = null) }
+        try {
+            Agent(llm, tools, gate).run(conversation).collect { ev -> handle(ev, threadId) }
+        } catch (t: Throwable) {
+            if (t !is kotlinx.coroutines.CancellationException) {
+                _state.update { it.copy(error = t.message ?: "Unknown error") }
+            }
+        } finally {
+            _state.update { it.copy(running = false) }
+            container.db.threads().touch(threadId)
+        }
+    }
+
+    private suspend fun handle(ev: AgentEvent, threadId: Long) {
+        when (ev) {
+            is AgentEvent.AssistantTextDelta ->
+                _state.update { it.copy(streamingText = it.streamingText + ev.text) }
+
+            is AgentEvent.AssistantTextDone -> Unit
+
+            is AgentEvent.ToolCallStart ->
+                _state.update {
+                    it.copy(pendingToolCalls = it.pendingToolCalls + (ev.id to PendingToolUi(ev.id, ev.name, "")))
+                }
+
+            is AgentEvent.ToolCallArgsDelta ->
+                _state.update {
+                    val cur = it.pendingToolCalls[ev.id] ?: return@update it
+                    it.copy(pendingToolCalls = it.pendingToolCalls + (ev.id to cur.copy(argsJson = cur.argsJson + ev.delta)))
+                }
+
+            is AgentEvent.ToolCallReady ->
+                _state.update {
+                    val cur = it.pendingToolCalls[ev.id] ?: PendingToolUi(ev.id, ev.name, ev.argsJson)
+                    it.copy(pendingToolCalls = it.pendingToolCalls + (ev.id to cur.copy(argsJson = ev.argsJson)))
+                }
+
+            is AgentEvent.ToolCallApproval ->
+                _state.update {
+                    val cur = it.pendingToolCalls[ev.id] ?: return@update it
+                    it.copy(pendingToolCalls = it.pendingToolCalls + (ev.id to cur.copy(approved = ev.decision != ApprovalDecision.Deny)))
+                }
+
+            is AgentEvent.ToolCallResult ->
+                _state.update {
+                    val cur = it.pendingToolCalls[ev.id] ?: return@update it
+                    it.copy(pendingToolCalls = it.pendingToolCalls + (ev.id to cur.copy(result = ev.result.content, isError = ev.result.isError)))
+                }
+
+            is AgentEvent.TurnDone -> persistNewMessages(threadId)
+
+            is AgentEvent.Failure -> _state.update { it.copy(error = ev.message) }
+
+            AgentEvent.Finished -> Unit
+        }
+    }
+
+    private suspend fun persistNewMessages(threadId: Long) {
+        val newItems = conversation.drop(persistedCount)
+        var uiMsgs = _state.value.messages
+        for (msg in newItems) {
+            val rowId = container.db.messages().insert(uiToRow(msg, threadId))
+            if (msg.role != Role.User || msg.blocks.any { it !is Block.ToolResult }) {
+                uiMsgs = uiMsgs + UiMessage(rowId, msg.role, msg.blocks)
+            }
+        }
+        persistedCount = conversation.size
+        _state.update { it.copy(messages = uiMsgs, streamingText = "", pendingToolCalls = emptyMap()) }
+    }
+
+    private fun uiToRow(msg: ConvMessage, threadId: Long): MessageEntity = MessageEntity(
+        threadId = threadId,
+        role = msg.role.name,
+        contentJson = blocksToJson(msg.blocks).toString(),
+    )
+
+    private fun rowToUi(row: MessageEntity): UiMessage? {
+        val role = runCatching { Role.valueOf(row.role) }.getOrNull() ?: return null
+        val arr = runCatching { Json.parseToJsonElement(row.contentJson).jsonArray }.getOrNull() ?: return null
+        return UiMessage(row.id, role, jsonToBlocks(arr))
+    }
+
+    private fun blocksToJson(blocks: List<Block>): JsonArray = buildJsonArray {
+        for (b in blocks) {
+            when (b) {
+                is Block.Text -> addJsonObject { put("kind", "text"); put("text", b.text) }
+                is Block.Image -> addJsonObject { put("kind", "image"); put("media_type", b.mediaType); put("data", b.base64) }
+                is Block.ToolUse -> addJsonObject { put("kind", "tool_use"); put("id", b.id); put("name", b.name); put("args", b.argsJson) }
+                is Block.ToolResult -> addJsonObject { put("kind", "tool_result"); put("id", b.toolUseId); put("content", b.content); put("is_error", b.isError) }
+            }
+        }
+    }
+
+    private fun jsonToBlocks(arr: JsonArray): List<Block> = arr.mapNotNull { el ->
+        val obj = el as? JsonObject ?: return@mapNotNull null
+        when (obj["kind"]?.jsonPrimitive?.contentOrNull) {
+            "text" -> Block.Text(obj["text"]?.jsonPrimitive?.contentOrNull ?: "")
+            "image" -> Block.Image(obj["media_type"]?.jsonPrimitive?.contentOrNull ?: "image/png", obj["data"]?.jsonPrimitive?.contentOrNull ?: "")
+            "tool_use" -> Block.ToolUse(obj["id"]?.jsonPrimitive?.contentOrNull ?: "", obj["name"]?.jsonPrimitive?.contentOrNull ?: "", obj["args"]?.jsonPrimitive?.contentOrNull ?: "{}")
+            "tool_result" -> Block.ToolResult(obj["id"]?.jsonPrimitive?.contentOrNull ?: "", obj["content"]?.jsonPrimitive?.contentOrNull ?: "", obj["is_error"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false)
+            else -> null
+        }
+    }
+}
