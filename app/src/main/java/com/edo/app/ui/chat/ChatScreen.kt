@@ -325,9 +325,18 @@ fun ChatScreen(
                                 }
                             }
                         }
+                        state.retryingAttempt?.let { attempt ->
+                            item("retrying") {
+                                RetryingBanner(attempt = attempt, maxAttempts = com.edo.app.agent.Agent.MAX_LLM_RETRIES)
+                            }
+                        }
                         state.error?.let { err ->
                             item("error") {
-                                ErrorBanner(err, onDismiss = { vm.dismissError() })
+                                ErrorBanner(
+                                    message = err,
+                                    onDismiss = { vm.dismissError() },
+                                    onRetry = if (state.canRetry) { { vm.retryAgent() } } else null,
+                                )
                             }
                         }
                     }
@@ -766,7 +775,40 @@ private fun CompletedToolCard(
 }
 
 @Composable
-private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
+private fun RetryingBanner(attempt: Int, maxAttempts: Int) {
+    val transition = rememberInfiniteTransition(label = "retry-pulse")
+    val alpha by transition.animateFloat(
+        initialValue = 0.5f, targetValue = 1f, label = "pulse",
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+    )
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Schedule,
+                null,
+                modifier = Modifier.size(14.dp).alpha(alpha),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Retrying… ($attempt / $maxAttempts)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ErrorBanner(message: String, onDismiss: () -> Unit, onRetry: (() -> Unit)? = null) {
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         shape = MaterialTheme.shapes.small,
@@ -790,6 +832,11 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
+            if (onRetry != null) {
+                TextButton(onClick = onRetry, modifier = Modifier.height(28.dp)) {
+                    Text("Retry", style = MaterialTheme.typography.labelSmall)
+                }
+            }
             TextButton(onClick = onDismiss, modifier = Modifier.height(28.dp)) {
                 Text("×", style = MaterialTheme.typography.bodyMedium)
             }

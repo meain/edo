@@ -86,6 +86,8 @@ data class ChatUiState(
     val running: Boolean = false,
     val error: String? = null,
     val needsProject: Boolean = false,
+    val retryingAttempt: Int? = null,
+    val canRetry: Boolean = false,
 )
 
 class ChatViewModel(app: Application, private val container: AppContainer) : AndroidViewModel(app) {
@@ -174,6 +176,14 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         agentJob?.cancel()
         agentJob = null
         _state.update { it.copy(running = false, approval = null) }
+    }
+
+    /** Re-run the agent against the current conversation (after all auto-retries exhausted). */
+    fun retryAgent() {
+        if (_state.value.running) return
+        val threadId = _state.value.currentThread?.id ?: return
+        _state.update { it.copy(error = null, canRetry = false) }
+        agentJob = container.appScope.launch { runAgent(threadId) }
     }
 
     fun sendUserMessage(text: String, image: Pair<String, String>? = null) {
@@ -284,7 +294,13 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 _state.update { it.copy(error = t.message ?: "Unknown error") }
             }
         } finally {
-            _state.update { it.copy(running = false) }
+            _state.update { s ->
+                s.copy(
+                    running = false,
+                    retryingAttempt = null,
+                    canRetry = s.error != null && s.currentThread != null,
+                )
+            }
             container.db.threads().touch(threadId)
         }
     }
@@ -328,6 +344,12 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
             is AgentEvent.TurnDone -> persistNewMessages(threadId)
 
             is AgentEvent.Failure -> _state.update { it.copy(error = ev.message) }
+
+            is AgentEvent.StreamingReset ->
+                _state.update { it.copy(streamingText = "", pendingToolCalls = emptyMap()) }
+
+            is AgentEvent.Retrying ->
+                _state.update { it.copy(streamingText = "", pendingToolCalls = emptyMap(), retryingAttempt = ev.attempt) }
 
             AgentEvent.Finished -> Unit
         }

@@ -5,6 +5,7 @@ import com.edo.app.llm.ConvMessage
 import com.edo.app.llm.LlmClient
 import com.edo.app.llm.LlmEvent
 import com.edo.app.llm.Role
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -38,6 +39,8 @@ sealed interface AgentEvent {
     data class ToolCallResult(val id: String, val result: ToolResult) : AgentEvent
     data class TurnDone(val stopReason: String?) : AgentEvent
     data class Failure(val message: String) : AgentEvent
+    data class Retrying(val attempt: Int, val maxAttempts: Int) : AgentEvent
+    data object StreamingReset : AgentEvent
     data object Finished : AgentEvent
 }
 
@@ -56,43 +59,60 @@ class Agent(
         var turn = 0
         while (turn < maxTurns) {
             turn++
-            val assistantBlocks = mutableListOf<Block>()
-            val pendingToolUses = linkedMapOf<String, ToolUseAccumulator>()
+            var assistantBlocks = mutableListOf<Block>()
+            var pendingToolUses = linkedMapOf<String, ToolUseAccumulator>()
             var assistantText = StringBuilder()
             var stopReason: String? = null
             var failed = false
+            var lastError: String? = null
 
-            llm.stream(systemPrompt, conversation.toList(), tools.specs).collect { ev ->
-                when (ev) {
-                    is LlmEvent.TextDelta -> {
-                        assistantText.append(ev.text)
-                        emit(AgentEvent.AssistantTextDelta(ev.text))
-                    }
-                    is LlmEvent.ToolUseStart -> {
-                        pendingToolUses[ev.id] = ToolUseAccumulator(ev.name)
-                        emit(AgentEvent.ToolCallStart(ev.id, ev.name))
-                    }
-                    is LlmEvent.ToolUseArgsDelta -> {
-                        pendingToolUses[ev.id]?.args?.append(ev.partialJson)
-                        emit(AgentEvent.ToolCallArgsDelta(ev.id, ev.partialJson))
-                    }
-                    is LlmEvent.ToolUseEnd -> {
-                        val acc = pendingToolUses[ev.id] ?: return@collect
-                        val argsJson = acc.args.toString().ifEmpty { "{}" }
-                        acc.finalArgs = argsJson
-                        emit(AgentEvent.ToolCallReady(ev.id, acc.name, argsJson))
-                    }
-                    is LlmEvent.TurnEnd -> {
-                        stopReason = ev.stopReason
-                    }
-                    is LlmEvent.Failure -> {
-                        failed = true
-                        emit(AgentEvent.Failure(ev.message))
+            for (attempt in 0..MAX_LLM_RETRIES) {
+                if (attempt > 0) {
+                    emit(AgentEvent.StreamingReset)
+                    emit(AgentEvent.Retrying(attempt, MAX_LLM_RETRIES))
+                    delay(2000L)
+                    assistantBlocks = mutableListOf()
+                    pendingToolUses = linkedMapOf()
+                    assistantText = StringBuilder()
+                    stopReason = null
+                }
+                failed = false
+
+                llm.stream(systemPrompt, conversation.toList(), tools.specs).collect { ev ->
+                    when (ev) {
+                        is LlmEvent.TextDelta -> {
+                            assistantText.append(ev.text)
+                            emit(AgentEvent.AssistantTextDelta(ev.text))
+                        }
+                        is LlmEvent.ToolUseStart -> {
+                            pendingToolUses[ev.id] = ToolUseAccumulator(ev.name)
+                            emit(AgentEvent.ToolCallStart(ev.id, ev.name))
+                        }
+                        is LlmEvent.ToolUseArgsDelta -> {
+                            pendingToolUses[ev.id]?.args?.append(ev.partialJson)
+                            emit(AgentEvent.ToolCallArgsDelta(ev.id, ev.partialJson))
+                        }
+                        is LlmEvent.ToolUseEnd -> {
+                            val acc = pendingToolUses[ev.id] ?: return@collect
+                            val argsJson = acc.args.toString().ifEmpty { "{}" }
+                            acc.finalArgs = argsJson
+                            emit(AgentEvent.ToolCallReady(ev.id, acc.name, argsJson))
+                        }
+                        is LlmEvent.TurnEnd -> {
+                            stopReason = ev.stopReason
+                        }
+                        is LlmEvent.Failure -> {
+                            failed = true
+                            lastError = ev.message
+                        }
                     }
                 }
+
+                if (!failed) break
             }
 
             if (failed) {
+                emit(AgentEvent.Failure(lastError ?: "Unknown error"))
                 emit(AgentEvent.Finished)
                 return@flow
             }
@@ -163,6 +183,7 @@ class Agent(
 
     companion object {
         const val DefaultSystemPrompt = """You are Edo, a coding assistant running on Android. You have access to tools that let you read, write, edit, list, and grep through a workspace folder the user has selected, plus an HTTP request tool. Use the tools to answer the user's question. Be concise."""
+        const val MAX_LLM_RETRIES = 5
     }
 }
 
@@ -178,11 +199,15 @@ fun buildSystemPrompt(ws: Workspace): String {
         out.append("\n\n# Project instructions (AGENTS.md)\n\n")
         out.append(agentsMd.trim())
     }
+    out.append("\n\n# Skills\n\n")
+    out.append("Skills are reusable instruction playbooks. Call `load_skill` with the skill name when a task matches.\n")
+    out.append("\n## Built-in skills\n\n")
+    for ((name, entry) in BuiltinSkills.all) {
+        out.append("- **$name** — ${entry.description}\n")
+    }
     val skills = discoverSkills(ws)
     if (skills.isNotEmpty()) {
-        out.append("\n\n# Available skills\n\n")
-        out.append("These are markdown playbooks the user has authored for this project. ")
-        out.append("When a skill seems relevant to the user's request, call the load_skill tool with its name to read the full instructions before acting.\n\n")
+        out.append("\n## Project skills\n\n")
         for (s in skills) {
             out.append("- **${s.name}** — ${s.description}\n")
         }
@@ -192,19 +217,35 @@ fun buildSystemPrompt(ws: Workspace): String {
 
 data class SkillInfo(val name: String, val description: String, val path: String)
 
-/** Discover skill markdown files under .edo/skills/ (or .agents/skills/). */
+/** Discover skills under .edo/skills/ (or .agents/skills/).
+ *  Supports folder-based skills (agentskills.io format: <name>/SKILL.md)
+ *  and legacy flat .md files side-by-side. */
 fun discoverSkills(ws: Workspace): List<SkillInfo> {
     val roots = listOf(".edo/skills", ".agents/skills")
+    val seen = mutableSetOf<String>()
     val out = mutableListOf<SkillInfo>()
     for (root in roots) {
         val entries = ws.ls(root) ?: continue
         for (e in entries) {
-            if (e.isDir || !e.name.endsWith(".md", ignoreCase = true)) continue
-            val path = "$root/${e.name}"
-            val content = ws.read(path) ?: continue
-            val name = e.name.removeSuffix(".md").removeSuffix(".MD")
-            val description = extractSkillDescription(content) ?: "(no description)"
-            out.add(SkillInfo(name = name, description = description, path = path))
+            if (e.isDir) {
+                // Folder-based skill: <name>/SKILL.md
+                val skillPath = "$root/${e.name}/SKILL.md"
+                val content = ws.read(skillPath) ?: continue
+                val name = e.name
+                if (seen.add(name)) {
+                    val description = extractSkillDescription(content) ?: "(no description)"
+                    out.add(SkillInfo(name = name, description = description, path = skillPath))
+                }
+            } else if (e.name.endsWith(".md", ignoreCase = true)) {
+                // Legacy flat .md file
+                val name = e.name.removeSuffix(".md").removeSuffix(".MD")
+                if (seen.add(name)) {
+                    val path = "$root/${e.name}"
+                    val content = ws.read(path) ?: continue
+                    val description = extractSkillDescription(content) ?: "(no description)"
+                    out.add(SkillInfo(name = name, description = description, path = path))
+                }
+            }
         }
     }
     return out.sortedBy { it.name }
@@ -249,10 +290,11 @@ class LoadSkillTool(private val ws: Workspace) : Tool {
         val obj = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val name = obj["name"]?.jsonPrimitive?.contentOrNull
             ?: return ToolResult("missing 'name'", isError = true)
+        BuiltinSkills.all[name]?.let { return ToolResult(it.content) }
         val skills = discoverSkills(ws)
         val match = skills.firstOrNull { it.name.equals(name, ignoreCase = true) }
             ?: return ToolResult(
-                "skill '$name' not found. Available: ${skills.joinToString(", ") { it.name }}",
+                "skill '$name' not found. Available: ${(BuiltinSkills.all.keys + skills.map { it.name }).joinToString(", ")}",
                 isError = true,
             )
         val content = ws.read(match.path)
