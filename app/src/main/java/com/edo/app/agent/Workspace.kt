@@ -12,9 +12,13 @@ import java.io.OutputStream
 interface Workspace {
     fun read(path: String): String?
     fun write(path: String, content: String): Boolean
+    fun delete(path: String): Boolean
+    fun copy(source: String, dest: String): Boolean
     fun ls(path: String): List<Entry>?
     /** Walk relative paths under [path] for grep-style search. */
     fun walkTextFiles(path: String): Sequence<TextFile>
+    /** Content URI for a file, when available (used by the file manager's "open with"). */
+    fun uriFor(path: String): Uri? = null
 
     data class Entry(val name: String, val isDir: Boolean, val size: Long)
     data class TextFile(val path: String, val content: String)
@@ -51,6 +55,32 @@ class SafWorkspace(
             true
         } ?: false
     }
+
+    override fun delete(path: String): Boolean {
+        val file = resolve(path) ?: return false
+        return runCatching { file.delete() }.getOrElse { false }
+    }
+
+    override fun copy(source: String, dest: String): Boolean {
+        val r = root ?: return false
+        val src = resolve(source) ?: return false
+        if (!src.isFile) return false
+        val (dir, name) = walkOrCreateDirs(r, dest) ?: return false
+        val target = dir.findFile(name)
+            ?: dir.createFile("application/octet-stream", name)
+            ?: return false
+        val resolver = context.contentResolver
+        return runCatching {
+            resolver.openInputStream(src.uri)?.use { input ->
+                resolver.openOutputStream(target.uri, "wt")?.use { out: OutputStream ->
+                    input.copyTo(out)
+                    true
+                } ?: false
+            } ?: false
+        }.getOrElse { false }
+    }
+
+    override fun uriFor(path: String): Uri? = resolve(path)?.uri
 
     override fun ls(path: String): List<Workspace.Entry>? {
         val dir = if (path.isBlank() || path == "/" || path == ".") root else resolve(path)
@@ -129,6 +159,26 @@ class FileWorkspace(private val root: java.io.File) : Workspace {
         return runCatching { f.writeText(content); true }.getOrElse { false }
     }
 
+    override fun delete(path: String): Boolean {
+        val f = resolve(path) ?: return false
+        return runCatching {
+            if (f.isDirectory) f.deleteRecursively() else f.delete()
+        }.getOrElse { false }
+    }
+
+    override fun copy(source: String, dest: String): Boolean {
+        val src = resolve(source) ?: return false
+        val dst = resolve(dest) ?: return false
+        if (!src.isFile) return false
+        dst.parentFile?.mkdirs()
+        return runCatching { src.copyTo(dst, overwrite = true); true }.getOrElse { false }
+    }
+
+    override fun uriFor(path: String): Uri? {
+        val f = resolve(path) ?: return null
+        return if (f.exists()) Uri.fromFile(f) else null
+    }
+
     override fun ls(path: String): List<Workspace.Entry>? {
         val dir = if (path.isBlank() || path == "/" || path == ".") root else resolve(path)
         if (dir == null || !dir.isDirectory) return null
@@ -162,6 +212,22 @@ class InMemoryWorkspace(initial: Map<String, String> = emptyMap()) : Workspace {
 
     override fun write(path: String, content: String): Boolean {
         files[normalize(path)] = content
+        return true
+    }
+
+    override fun delete(path: String): Boolean {
+        val p = normalize(path)
+        if (files.remove(p) != null) return true
+        val prefix = "$p/"
+        val keys = files.keys.filter { it.startsWith(prefix) }
+        if (keys.isEmpty()) return false
+        for (k in keys) files.remove(k)
+        return true
+    }
+
+    override fun copy(source: String, dest: String): Boolean {
+        val content = files[normalize(source)] ?: return false
+        files[normalize(dest)] = content
         return true
     }
 

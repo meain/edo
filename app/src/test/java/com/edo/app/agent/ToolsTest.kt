@@ -134,6 +134,59 @@ class ToolsTest {
     }
 
     @Test
+    fun deleteFileRemovesEntry() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.txt" to "x", "keep.txt" to "y"))
+        val r = DeleteFileTool(ws).invoke("""{"path":"a.txt"}""")
+        assertFalse(r.isError)
+        assertEquals(null, ws.read("a.txt"))
+        assertEquals("y", ws.read("keep.txt"))
+        assertTrue(r.content.contains("deleted"))
+    }
+
+    @Test
+    fun deleteFileMissingIsError() = runTest {
+        val ws = InMemoryWorkspace()
+        val r = DeleteFileTool(ws).invoke("""{"path":"nope.txt"}""")
+        assertTrue(r.isError)
+    }
+
+    @Test
+    fun copyFileDuplicatesContent() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.txt" to "hello"))
+        val r = CopyFileTool(ws).invoke("""{"source":"a.txt","dest":"sub/b.txt"}""")
+        assertFalse(r.isError)
+        assertEquals("hello", ws.read("a.txt"))
+        assertEquals("hello", ws.read("sub/b.txt"))
+        assertTrue(r.content.contains("copied"))
+    }
+
+    @Test
+    fun copyFileMissingSourceIsError() = runTest {
+        val ws = InMemoryWorkspace()
+        val r = CopyFileTool(ws).invoke("""{"source":"missing.txt","dest":"out.txt"}""")
+        assertTrue(r.isError)
+    }
+
+    @Test
+    fun copyFileSameSourceAndDestIsError() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.txt" to "x"))
+        val r = CopyFileTool(ws).invoke("""{"source":"a.txt","dest":"a.txt"}""")
+        assertTrue(r.isError)
+    }
+
+    @Test
+    fun dateTimeReturnsStableFormat() = runTest {
+        // Fixed clock: 2026-06-15T12:00:00Z → 1750982400000 ms
+        val fixed = 1750982400000L
+        val r = DateTimeTool { fixed }.invoke("""{}""")
+        assertFalse(r.isError)
+        assertTrue("expected ISO local line, got: ${r.content}", r.content.contains("local:"))
+        assertTrue("expected UTC line, got: ${r.content}", r.content.contains("utc:"))
+        assertTrue("expected zone line, got: ${r.content}", r.content.contains("zone:"))
+        assertTrue("expected epoch ms, got: ${r.content}", r.content.contains("$fixed"))
+    }
+
+    @Test
     fun httpRequestPropagatesFetcherErrors() = runTest {
         val fake = object : HttpFetcher {
             override suspend fun fetch(url: String, method: String, headers: Map<String, String>, body: String?): String {

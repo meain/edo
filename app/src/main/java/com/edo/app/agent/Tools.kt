@@ -111,6 +111,44 @@ class EditFileTool(private val ws: Workspace) : Tool {
     }
 }
 
+class DeleteFileTool(private val ws: Workspace) : Tool {
+    override val spec = ToolSpec(
+        name = "delete_file",
+        description = "Delete a file (or empty/non-empty directory) from the workspace. Returns an error if the path does not exist or cannot be deleted.",
+        parametersJson = """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""",
+    )
+
+    override suspend fun invoke(argsJson: String): ToolResult {
+        val args = parseArgs(argsJson)
+        val path = args.str("path") ?: return ToolResult("missing 'path'", isError = true)
+        if (ws.read(path) == null && ws.ls(path) == null) {
+            return ToolResult("not found: $path", isError = true)
+        }
+        val ok = ws.delete(path)
+        if (!ok) return ToolResult("failed to delete $path", isError = true)
+        return ToolResult("deleted $path")
+    }
+}
+
+class CopyFileTool(private val ws: Workspace) : Tool {
+    override val spec = ToolSpec(
+        name = "copy_file",
+        description = "Copy a file from 'source' to 'dest' inside the workspace. Overwrites 'dest' if it already exists. Use a fresh path under the workspace root for 'dest'.",
+        parametersJson = """{"type":"object","properties":{"source":{"type":"string"},"dest":{"type":"string"}},"required":["source","dest"]}""",
+    )
+
+    override suspend fun invoke(argsJson: String): ToolResult {
+        val args = parseArgs(argsJson)
+        val source = args.str("source") ?: return ToolResult("missing 'source'", isError = true)
+        val dest = args.str("dest") ?: return ToolResult("missing 'dest'", isError = true)
+        if (source == dest) return ToolResult("source and dest are the same path", isError = true)
+        if (ws.read(source) == null) return ToolResult("not found: $source", isError = true)
+        val ok = ws.copy(source, dest)
+        if (!ok) return ToolResult("failed to copy $source → $dest", isError = true)
+        return ToolResult("copied $source → $dest")
+    }
+}
+
 class LsTool(private val ws: Workspace) : Tool {
     override val spec = ToolSpec(
         name = "ls",
@@ -162,6 +200,28 @@ class GrepTool(private val ws: Workspace) : Tool {
         }
         if (matches == 0) return ToolResult("(no matches)")
         return ToolResult(out.toString())
+    }
+}
+
+class DateTimeTool(private val clock: () -> Long = System::currentTimeMillis) : Tool {
+    override val spec = ToolSpec(
+        name = "current_datetime",
+        description = "Get the current date and time. Returns ISO 8601 formatted local time plus a UTC timestamp, the device timezone, and milliseconds since epoch.",
+        parametersJson = """{"type":"object","properties":{}}""",
+    )
+
+    override suspend fun invoke(argsJson: String): ToolResult {
+        val nowMs = clock()
+        val zone = java.time.ZoneId.systemDefault()
+        val instant = java.time.Instant.ofEpochMilli(nowMs)
+        val local = instant.atZone(zone)
+        val out = buildString {
+            append("local: ").append(local.format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)).append('\n')
+            append("utc:   ").append(instant.toString()).append('\n')
+            append("zone:  ").append(zone.id).append('\n')
+            append("epoch: ").append(nowMs)
+        }
+        return ToolResult(out)
     }
 }
 
