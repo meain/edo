@@ -151,6 +151,10 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
                         }
                         confirmDelete = null
                     },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
                 ) { Text("Delete") }
             },
             dismissButton = {
@@ -187,6 +191,10 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
                 container = container,
                 project = proj,
                 onDone = { editing = null },
+                onDeleteRequest = {
+                    editing = null
+                    confirmDelete = proj
+                },
             )
         }
     }
@@ -437,6 +445,7 @@ private fun EditProjectSheet(
     container: AppContainer,
     project: ProjectEntity,
     onDone: () -> Unit,
+    onDeleteRequest: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var name by remember(project.id) { mutableStateOf(project.name) }
@@ -494,6 +503,28 @@ private fun EditProjectSheet(
                     }
                 },
             ) { Text("Save") }
+        }
+        Spacer(Modifier.height(12.dp))
+        androidx.compose.material3.HorizontalDivider()
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = onDeleteRequest,
+            modifier = Modifier.fillMaxWidth(),
+            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.error,
+            ),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
+            ),
+        ) {
+            Icon(
+                Icons.Filled.Delete,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Delete project")
         }
     }
 }
