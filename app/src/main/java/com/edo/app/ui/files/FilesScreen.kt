@@ -48,6 +48,7 @@ import com.edo.app.AppContainer
 import com.edo.app.agent.FileWorkspace
 import com.edo.app.agent.SafWorkspace
 import com.edo.app.agent.Workspace
+import com.edo.app.ui.chat.MarkdownText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -173,8 +174,8 @@ fun FilesScreen(container: AppContainer, onBack: () -> Unit) {
 
 @Composable
 private fun FileView(path: String, content: String) {
-    val hScroll = rememberScrollState()
-    val vScroll = rememberScrollState()
+    val isMarkdown = path.endsWith(".md", ignoreCase = true) ||
+        path.endsWith(".markdown", ignoreCase = true)
     Column(Modifier.fillMaxSize()) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
@@ -187,18 +188,32 @@ private fun FileView(path: String, content: String) {
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             )
         }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(vScroll)
-                .horizontalScroll(hScroll)
-                .padding(12.dp),
-        ) {
-            Text(
-                content,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
-            )
+        if (isMarkdown) {
+            val vScroll = rememberScrollState()
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(vScroll)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                MarkdownText(text = content)
+            }
+        } else {
+            val hScroll = rememberScrollState()
+            val vScroll = rememberScrollState()
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(vScroll)
+                    .horizontalScroll(hScroll)
+                    .padding(12.dp),
+            ) {
+                Text(
+                    content,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }
 }
