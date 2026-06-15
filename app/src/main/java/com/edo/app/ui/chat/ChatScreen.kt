@@ -484,11 +484,15 @@ private fun AssistantBubble(text: String, isStreaming: Boolean, expandedIds: Mut
             color = MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp),
         ) {
-            Text(
-                text = if (isStreaming) "$text▌" else text,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                MarkdownText(text = text)
+                if (isStreaming) {
+                    Text(
+                        text = "▌",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
         }
         Spacer(Modifier.weight(1f))
     }
