@@ -157,6 +157,29 @@ class AgentTest {
     }
 
     @Test
+    fun buildSystemPromptIncludesAgentsMd() {
+        val ws = InMemoryWorkspace(mapOf("AGENTS.md" to "Rule: always be brief."))
+        val prompt = buildSystemPrompt(ws)
+        assertTrue(prompt.contains(Agent.DefaultSystemPrompt))
+        assertTrue(prompt.contains("Rule: always be brief."))
+        assertTrue(prompt.contains("AGENTS.md"))
+    }
+
+    @Test
+    fun buildSystemPromptFallsBackToClaudeMd() {
+        val ws = InMemoryWorkspace(mapOf("CLAUDE.md" to "use_jj"))
+        val prompt = buildSystemPrompt(ws)
+        assertTrue(prompt.contains("use_jj"))
+    }
+
+    @Test
+    fun buildSystemPromptOmitsSectionWhenMissing() {
+        val ws = InMemoryWorkspace()
+        val prompt = buildSystemPrompt(ws)
+        assertEquals(Agent.DefaultSystemPrompt, prompt)
+    }
+
+    @Test
     fun llmFailureFinishesAgentRun() = runTest {
         val script = listOf(
             listOf(LlmEvent.Failure("boom")),

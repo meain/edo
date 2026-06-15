@@ -18,6 +18,7 @@ import com.edo.app.agent.SafWorkspace
 import com.edo.app.agent.ToolRegistry
 import com.edo.app.agent.WriteFileTool
 import com.edo.app.agent.AgentEvent
+import com.edo.app.agent.buildSystemPrompt
 import com.edo.app.data.MessageEntity
 import com.edo.app.data.ProjectEntity
 import com.edo.app.data.Provider
@@ -254,9 +255,10 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 }
             }
         }
+        val systemPrompt = buildSystemPrompt(ws)
         _state.update { it.copy(running = true, error = null) }
         try {
-            Agent(llm, tools, gate).run(conversation).collect { ev -> handle(ev, threadId) }
+            Agent(llm, tools, gate, systemPrompt = systemPrompt).run(conversation).collect { ev -> handle(ev, threadId) }
         } catch (t: Throwable) {
             if (t !is kotlinx.coroutines.CancellationException) {
                 _state.update { it.copy(error = t.message ?: "Unknown error") }
