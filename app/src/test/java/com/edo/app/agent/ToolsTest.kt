@@ -175,6 +175,22 @@ class ToolsTest {
     }
 
     @Test
+    fun writeFileMalformedJsonReportsParseError() = runTest {
+        val ws = InMemoryWorkspace()
+        // Unescaped double quote inside the "content" string — common when an
+        // LLM forgets to escape quotes in raw HTML/code.
+        val bad = """{"path":"page.html","content":"<a href="x">hi</a>"}"""
+        val r = WriteFileTool(ws).invoke(bad)
+        assertTrue(r.isError)
+        assertTrue(
+            "expected hint about JSON escaping, got: ${r.content}",
+            r.content.contains("invalid tool arguments JSON"),
+        )
+        // The model should see the offending input echoed back so it can correct.
+        assertTrue("expected raw args echoed, got: ${r.content}", r.content.contains("page.html"))
+    }
+
+    @Test
     fun dateTimeReturnsStableFormat() = runTest {
         // Fixed clock: 2026-06-15T12:00:00Z → 1750982400000 ms
         val fixed = 1750982400000L

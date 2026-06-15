@@ -246,9 +246,7 @@ class LoadSkillTool(private val ws: Workspace) : Tool {
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
-        val obj = runCatching {
-            kotlinx.serialization.json.Json.parseToJsonElement(argsJson).jsonObject
-        }.getOrElse { kotlinx.serialization.json.JsonObject(emptyMap()) }
+        val obj = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val name = obj["name"]?.jsonPrimitive?.contentOrNull
             ?: return ToolResult("missing 'name'", isError = true)
         val skills = discoverSkills(ws)

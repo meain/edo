@@ -17,8 +17,28 @@ import kotlinx.serialization.json.jsonPrimitive
 
 internal val ToolJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
-private fun parseArgs(argsJson: String): JsonObject =
-    runCatching { ToolJson.parseToJsonElement(argsJson).jsonObject }.getOrElse { JsonObject(emptyMap()) }
+/** Returns the parsed args object, or null if the JSON could not be parsed. */
+internal fun parseArgs(argsJson: String): JsonObject? =
+    runCatching { ToolJson.parseToJsonElement(argsJson).jsonObject }.getOrNull()
+
+/** Build a precise tool error explaining that args JSON was malformed,
+ *  so the model can self-correct on the next turn. */
+internal fun argsParseError(argsJson: String): ToolResult {
+    val snippet = argsJson.take(400)
+    val suffix = if (argsJson.length > 400) "…[truncated]" else ""
+    val reason = runCatching { ToolJson.parseToJsonElement(argsJson) }
+        .exceptionOrNull()?.message
+        ?.lineSequence()?.firstOrNull()
+        ?: "invalid JSON"
+    return ToolResult(
+        "invalid tool arguments JSON: $reason. " +
+            "Likely cause: unescaped quotes, backslashes, or control characters " +
+            "inside a string value (e.g. raw HTML/code). Re-emit the call with " +
+            "the string properly JSON-escaped. Received bytes (${argsJson.length}): " +
+            "$snippet$suffix",
+        isError = true,
+    )
+}
 
 private fun JsonObject.str(key: String): String? =
     this[key]?.jsonPrimitive?.contentOrNull
@@ -33,7 +53,7 @@ class ReadFileTool(private val ws: Workspace) : Tool {
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson)
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val path = args.str("path") ?: return ToolResult("missing 'path'", isError = true)
         val text = ws.read(path) ?: return ToolResult("not found: $path", isError = true)
         val out = if (text.length > MAX_BYTES) text.substring(0, MAX_BYTES) + "\n…[truncated]" else text
@@ -49,7 +69,7 @@ class WriteFileTool(private val ws: Workspace) : Tool {
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson)
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val path = args.str("path") ?: return ToolResult("missing 'path'", isError = true)
         val content = args.str("content") ?: return ToolResult("missing 'content'", isError = true)
         val existed = ws.read(path) != null
@@ -68,7 +88,7 @@ class EditFileTool(private val ws: Workspace) : Tool {
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson)
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val path = args.str("path") ?: return ToolResult("missing 'path'", isError = true)
         val oldStr = args.str("old_string") ?: return ToolResult("missing 'old_string'", isError = true)
         val newStr = args.str("new_string") ?: return ToolResult("missing 'new_string'", isError = true)
@@ -119,7 +139,7 @@ class DeleteFileTool(private val ws: Workspace) : Tool {
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson)
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val path = args.str("path") ?: return ToolResult("missing 'path'", isError = true)
         if (ws.read(path) == null && ws.ls(path) == null) {
             return ToolResult("not found: $path", isError = true)
@@ -138,7 +158,7 @@ class CopyFileTool(private val ws: Workspace) : Tool {
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson)
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val source = args.str("source") ?: return ToolResult("missing 'source'", isError = true)
         val dest = args.str("dest") ?: return ToolResult("missing 'dest'", isError = true)
         if (source == dest) return ToolResult("source and dest are the same path", isError = true)
@@ -157,7 +177,7 @@ class LsTool(private val ws: Workspace) : Tool {
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson)
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val path = args.str("path") ?: ""
         val entries = ws.ls(path) ?: return ToolResult("not a directory: $path", isError = true)
         if (entries.isEmpty()) return ToolResult("(empty)")
@@ -177,7 +197,7 @@ class GrepTool(private val ws: Workspace) : Tool {
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson)
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val pattern = args.str("pattern") ?: return ToolResult("missing 'pattern'", isError = true)
         val path = args.str("path") ?: ""
         val regex = runCatching { Regex(pattern) }.getOrElse {
@@ -238,7 +258,7 @@ class HttpRequestTool(private val fetcher: HttpFetcher) : Tool {
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson)
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
         val url = args.str("url") ?: return ToolResult("missing 'url'", isError = true)
         val method = args.str("method")?.uppercase() ?: "GET"
         val headers = (args["headers"] as? JsonObject)
