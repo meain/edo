@@ -13,6 +13,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "projects")
@@ -20,6 +22,8 @@ data class ProjectEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     @ColumnInfo(name = "name") val name: String,
     @ColumnInfo(name = "workspace_uri") val workspaceUri: String,
+    @ColumnInfo(name = "description", defaultValue = "") val description: String = "",
+    @ColumnInfo(name = "yolo_mode", defaultValue = "0") val yoloMode: Boolean = false,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
 )
 
@@ -109,7 +113,7 @@ interface MessageDao {
 
 @Database(
     entities = [ProjectEntity::class, ThreadEntity::class, MessageEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -120,12 +124,24 @@ abstract class ChatDatabase : RoomDatabase() {
     companion object {
         @Volatile private var instance: ChatDatabase? = null
 
+        /** v3 → v4: add description + yolo_mode columns on projects. */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE projects ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE projects ADD COLUMN yolo_mode INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
-            ).fallbackToDestructiveMigration().build().also { instance = it }
+            )
+                .addMigrations(MIGRATION_3_4)
+                .fallbackToDestructiveMigration()
+                .build()
+                .also { instance = it }
         }
     }
 }

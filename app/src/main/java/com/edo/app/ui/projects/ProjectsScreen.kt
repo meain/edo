@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -68,6 +69,7 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
     val activeId by container.activeProjectId.collectAsState()
     var showCreate by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<ProjectEntity?>(null) }
+    var editing by remember { mutableStateOf<ProjectEntity?>(null) }
 
     Scaffold(
         topBar = {
@@ -125,6 +127,7 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
                             container.setActiveProject(project.id)
                             onBack()
                         },
+                        onEdit = { editing = project },
                         onDelete = { confirmDelete = project },
                     )
                 }
@@ -173,6 +176,20 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
             )
         }
     }
+
+    editing?.let { proj ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { editing = null },
+            sheetState = sheetState,
+        ) {
+            EditProjectSheet(
+                container = container,
+                project = proj,
+                onDone = { editing = null },
+            )
+        }
+    }
 }
 
 @Composable
@@ -180,6 +197,7 @@ private fun ProjectRow(
     project: ProjectEntity,
     isActive: Boolean,
     onSelect: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val bg = if (isActive) MaterialTheme.colorScheme.secondaryContainer
@@ -206,14 +224,40 @@ private fun ProjectRow(
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = project.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (isActive) androidx.compose.ui.text.font.FontWeight.SemiBold
-                    else androidx.compose.ui.text.font.FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = project.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = if (isActive) androidx.compose.ui.text.font.FontWeight.SemiBold
+                        else androidx.compose.ui.text.font.FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (project.yoloMode) {
+                        Spacer(Modifier.width(6.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                "YOLO",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                            )
+                        }
+                    }
+                }
+                if (project.description.isNotBlank()) {
+                    Text(
+                        text = project.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 val folderLabel = humanWorkspacePath(project.workspaceUri)
                 Text(
                     text = folderLabel,
@@ -231,6 +275,14 @@ private fun ProjectRow(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(4.dp))
+            }
+            IconButton(onClick = onEdit) {
+                Icon(
+                    Icons.Filled.Settings,
+                    contentDescription = "Edit project",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
             }
             IconButton(onClick = onDelete) {
                 Icon(
@@ -256,7 +308,9 @@ private fun CreateProjectSheet(
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     var name by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
     var workspaceUri by remember { mutableStateOf("") }
+    var yoloMode by remember { mutableStateOf(false) }
 
     val pickFolder = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -294,6 +348,15 @@ private fun CreateProjectSheet(
             singleLine = true,
         )
         Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = description,
+            onValueChange = { description = it },
+            label = { Text("Description (optional)") },
+            placeholder = { Text("What this project is about…") },
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 3,
+        )
+        Spacer(Modifier.height(12.dp))
         if (workspaceUri.isEmpty()) {
             OutlinedButton(
                 onClick = { keyboard?.hide(); pickFolder.launch(edoFolderUri) },
@@ -324,7 +387,9 @@ private fun CreateProjectSheet(
                 }
             }
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
+        YoloRow(yoloMode = yoloMode, onChange = { yoloMode = it })
+        Spacer(Modifier.height(20.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = onDismiss) { Text("Cancel") }
             Spacer(Modifier.width(8.dp))
@@ -332,13 +397,103 @@ private fun CreateProjectSheet(
                 onClick = {
                     scope.launch {
                         val id = container.db.projects().insert(
-                            ProjectEntity(name = name.trim(), workspaceUri = workspaceUri)
+                            ProjectEntity(
+                                name = name.trim(),
+                                workspaceUri = workspaceUri,
+                                description = description.trim(),
+                                yoloMode = yoloMode,
+                            )
                         )
                         onCreated(id)
                     }
                 },
                 enabled = name.isNotBlank() && workspaceUri.isNotEmpty(),
             ) { Text("Create") }
+        }
+    }
+}
+
+@Composable
+private fun YoloRow(yoloMode: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("YOLO mode", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                "Auto-approve all tool calls in this project",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        androidx.compose.material3.Switch(checked = yoloMode, onCheckedChange = onChange)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditProjectSheet(
+    container: AppContainer,
+    project: ProjectEntity,
+    onDone: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var name by remember(project.id) { mutableStateOf(project.name) }
+    var description by remember(project.id) { mutableStateOf(project.description) }
+    var yoloMode by remember(project.id) { mutableStateOf(project.yoloMode) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 32.dp)
+            .navigationBarsPadding()
+            .animateContentSize(),
+    ) {
+        Text("Project settings", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            humanWorkspacePath(project.workspaceUri),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(20.dp))
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("Project name") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = description,
+            onValueChange = { description = it },
+            label = { Text("Description") },
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 4,
+        )
+        Spacer(Modifier.height(16.dp))
+        YoloRow(yoloMode = yoloMode, onChange = { yoloMode = it })
+        Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onDone) { Text("Cancel") }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        container.db.projects().update(
+                            project.copy(
+                                name = name.trim().ifBlank { project.name },
+                                description = description.trim(),
+                                yoloMode = yoloMode,
+                            )
+                        )
+                        onDone()
+                    }
+                },
+            ) { Text("Save") }
         }
     }
 }

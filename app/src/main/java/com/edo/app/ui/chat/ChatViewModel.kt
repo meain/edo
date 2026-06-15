@@ -255,7 +255,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
             Provider.Anthropic -> AnthropicClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
             Provider.OpenAI -> OpenAIClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
         }
-        val yolo = settings.yoloMode
+        val yolo = project.yoloMode
         val gate = ApprovalGate { name, argsJson ->
             if (yolo) {
                 ApprovalDecision.AllowOnce
