@@ -43,8 +43,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
@@ -120,12 +123,26 @@ fun ChatScreen(
     val state by vm.state.collectAsState()
     var input by remember { mutableStateOf("") }
     var pendingImage by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingTextFile by remember { mutableStateOf<Pair<String, String>?>(null) }
     val expandedToolIds = remember { mutableStateMapOf<String, Boolean>() }
 
-    val pickMedia = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
+    val pickFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) pendingImage = readImageAsBase64(context.contentResolver, uri)
+        if (uri != null) {
+            val attachment = readAttachment(context.contentResolver, uri)
+            when (attachment) {
+                is Attachment.Image -> {
+                    pendingImage = attachment.mediaType to attachment.base64
+                }
+                is Attachment.Text -> {
+                    pendingTextFile = attachment.name to attachment.content
+                }
+                null -> android.widget.Toast
+                    .makeText(context, "Unsupported file type", android.widget.Toast.LENGTH_SHORT)
+                    .show()
+            }
+        }
     }
 
     // Camera capture: write to a cacheDir file via FileProvider, then read it
@@ -328,35 +345,27 @@ fun ChatScreen(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
                     if (pendingImage != null) {
-                        Row(
-                            modifier = Modifier.padding(bottom = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Filled.Add,
-                                null,
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text("Image attached", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(8.dp))
-                            TextButton(
-                                onClick = { pendingImage = null },
-                                modifier = Modifier.height(24.dp),
-                            ) { Text("Remove", style = MaterialTheme.typography.labelSmall) }
-                        }
+                        AttachmentChip(
+                            icon = Icons.Filled.Image,
+                            label = "Image attached",
+                            onRemove = { pendingImage = null },
+                        )
+                    }
+                    pendingTextFile?.let { (filename, content) ->
+                        AttachmentChip(
+                            icon = Icons.AutoMirrored.Filled.InsertDriveFile,
+                            label = "$filename · ${content.length} chars",
+                            onRemove = { pendingTextFile = null },
+                        )
                     }
                     Row(verticalAlignment = Alignment.Bottom) {
                         IconButton(
-                            onClick = {
-                                pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                            },
+                            onClick = { pickFile.launch(arrayOf("*/*")) },
                             modifier = Modifier.padding(bottom = 2.dp),
                         ) {
                             Icon(
-                                Icons.Filled.Add,
-                                contentDescription = "Attach image",
+                                Icons.Filled.AttachFile,
+                                contentDescription = "Attach file",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -392,16 +401,24 @@ fun ChatScreen(
                                 disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                             ),
                         )
+                        val hasContent = input.isNotBlank() || pendingImage != null || pendingTextFile != null
                         IconButton(
-                            enabled = if (state.running) true
-                            else !state.needsProject && (input.isNotBlank() || pendingImage != null),
+                            enabled = if (state.running) true else !state.needsProject && hasContent,
                             onClick = {
                                 if (state.running) {
                                     vm.cancelAgent()
                                 } else {
-                                    vm.sendUserMessage(input.trim(), pendingImage)
+                                    val composed = buildString {
+                                        pendingTextFile?.let { (filename, content) ->
+                                            append("Attached file `").append(filename).append("`:\n")
+                                            append("```\n").append(content).append("\n```\n\n")
+                                        }
+                                        append(input.trim())
+                                    }
+                                    vm.sendUserMessage(composed.trim(), pendingImage)
                                     input = ""
                                     pendingImage = null
+                                    pendingTextFile = null
                                 }
                             },
                             modifier = Modifier.padding(bottom = 2.dp),
@@ -416,7 +433,7 @@ fun ChatScreen(
                                 Icon(
                                     Icons.AutoMirrored.Filled.Send,
                                     contentDescription = "Send",
-                                    tint = if (!state.needsProject && (input.isNotBlank() || pendingImage != null))
+                                    tint = if (!state.needsProject && hasContent)
                                         MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -714,14 +731,33 @@ private fun CompletedToolCard(
                         )
                     }
                     if (result != null) {
-                        Text("Result", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        val preview = if (result.length > 600) result.take(600) + "\n…" else result
+                        val resultLabel = if (isError) "Error" else "Result"
+                        val resultColor = if (isError) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                         Text(
-                            preview,
-                            fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 2.dp),
+                            resultLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = resultColor,
                         )
+                        // Errors are shown in full so the model's hint text isn't truncated;
+                        // successful results stay capped to keep large file dumps readable.
+                        val cap = if (isError) 8000 else 1200
+                        val preview = if (result.length > cap) result.take(cap) + "\n…[truncated, " + (result.length - cap) + " more chars]" else result
+                        Surface(
+                            color = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+                            else MaterialTheme.colorScheme.surfaceContainerHighest,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.padding(top = 4.dp),
+                        ) {
+                            Text(
+                                preview,
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isError) MaterialTheme.colorScheme.onErrorContainer
+                                else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(8.dp).fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }
@@ -781,6 +817,79 @@ private fun readImageAsBase64(resolver: ContentResolver, uri: Uri): Pair<String,
     val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
     val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
     return type to b64
+}
+
+private sealed interface Attachment {
+    data class Image(val mediaType: String, val base64: String) : Attachment
+    data class Text(val name: String, val content: String) : Attachment
+}
+
+private const val MAX_TEXT_ATTACHMENT_BYTES = 256 * 1024
+
+// Read a picked document URI into either an Image (for image mimes) or a
+// Text attachment (for text mimes, or any other file whose bytes decode as
+// valid UTF-8 within the size cap). Returns null for unsupported types.
+private fun readAttachment(resolver: ContentResolver, uri: Uri): Attachment? {
+    val mime = resolver.getType(uri) ?: ""
+    val name = queryDisplayName(resolver, uri) ?: "attachment"
+    if (mime.startsWith("image/")) {
+        val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        return Attachment.Image(mime, Base64.encodeToString(bytes, Base64.NO_WRAP))
+    }
+    val bytes = resolver.openInputStream(uri)?.use {
+        it.readNBytes(MAX_TEXT_ATTACHMENT_BYTES)
+    } ?: return null
+    if (bytes.isEmpty()) return null
+    val text = runCatching { bytes.toString(Charsets.UTF_8) }.getOrNull() ?: return null
+    // Treat as text if the mime declares so, if it is a structured-text
+    // format, or if the bytes contain no NUL byte (reliable non-binary signal).
+    val looksLikeText = mime.startsWith("text/") ||
+        mime in setOf("application/json", "application/xml", "application/yaml",
+                      "application/javascript", "application/toml") ||
+        !bytes.contains(0)
+    if (looksLikeText) return Attachment.Text(name, text)
+    return null
+}
+
+private fun queryDisplayName(resolver: ContentResolver, uri: Uri): String? {
+    return runCatching {
+        resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+    }.getOrNull()
+}
+
+@Composable
+private fun AttachmentChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.padding(bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            null,
+            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Spacer(Modifier.width(8.dp))
+        TextButton(onClick = onRemove, modifier = Modifier.height(24.dp)) {
+            Text("Remove", style = MaterialTheme.typography.labelSmall)
+        }
+    }
 }
 
 /** Create a content:// URI in our app's cacheDir/captures/ for the camera
