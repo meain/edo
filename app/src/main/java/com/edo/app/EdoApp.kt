@@ -7,6 +7,9 @@ import com.edo.app.data.SettingsStore
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +21,11 @@ class AppContainer(app: Application) {
         expectSuccess = false
         install(HttpTimeout)
     }
+
+    /** Process-wide scope. Used by long-running agent jobs so they survive
+     *  ViewModel teardown (e.g., navigating away within the app or brief
+     *  configuration churn). It outlives any individual screen. */
+    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val _activeProjectId = MutableStateFlow(settings.load().activeProjectId)
     val activeProjectId: StateFlow<Long> = _activeProjectId.asStateFlow()

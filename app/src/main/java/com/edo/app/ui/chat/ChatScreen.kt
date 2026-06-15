@@ -23,15 +23,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -54,6 +57,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -61,11 +65,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -192,7 +197,7 @@ fun ChatScreen(
                         }
                         IconButton(
                             onClick = { vm.newChat() },
-                            enabled = !state.running && (state.currentThread != null || state.messages.isNotEmpty()),
+                            enabled = state.running || state.currentThread != null || state.messages.isNotEmpty(),
                         ) {
                             Icon(Icons.Filled.Edit, contentDescription = "New chat")
                         }
@@ -280,11 +285,13 @@ fun ChatScreen(
             }
 
             // --- Input bar pinned to bottom of column ---
-            Surface(tonalElevation = 2.dp) {
+            Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
+                        .windowInsetsPadding(
+                            WindowInsets.navigationBars.exclude(WindowInsets.ime)
+                        )
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
                     if (pendingImage != null) {
@@ -320,25 +327,42 @@ fun ChatScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        OutlinedTextField(
+                        TextField(
                             value = input,
                             onValueChange = { input = it },
                             modifier = Modifier.weight(1f),
                             placeholder = { Text("Message…") },
                             maxLines = 6,
                             shape = RoundedCornerShape(24.dp),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                disabledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            ),
                         )
                         IconButton(
-                            enabled = !state.running && !state.needsProject && (input.isNotBlank() || pendingImage != null),
+                            enabled = if (state.running) true
+                            else !state.needsProject && (input.isNotBlank() || pendingImage != null),
                             onClick = {
-                                vm.sendUserMessage(input.trim(), pendingImage)
-                                input = ""
-                                pendingImage = null
+                                if (state.running) {
+                                    vm.cancelAgent()
+                                } else {
+                                    vm.sendUserMessage(input.trim(), pendingImage)
+                                    input = ""
+                                    pendingImage = null
+                                }
                             },
                             modifier = Modifier.padding(bottom = 2.dp),
                         ) {
                             if (state.running) {
-                                TypingDots()
+                                Icon(
+                                    Icons.Filled.Stop,
+                                    contentDescription = "Stop",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
                             } else {
                                 Icon(
                                     Icons.AutoMirrored.Filled.Send,
@@ -367,7 +391,7 @@ fun ChatScreen(
                 Modifier
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 32.dp)
-                    .navigationBarsPadding(),
+                    .windowInsetsPadding(WindowInsets.navigationBars),
             ) {
                 Text("Tool call", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(4.dp))

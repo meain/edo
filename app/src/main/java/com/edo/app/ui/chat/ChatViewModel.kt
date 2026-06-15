@@ -156,11 +156,20 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         _state.value = ChatUiState(currentProject = project, currentThread = thread, messages = visible)
     }
 
-    /** Clear active thread to show empty "new chat" state. A new ThreadEntity is created on first send. */
+    /** Clear active thread to show empty "new chat" state. A new ThreadEntity is created on first send.
+     *  Any in-flight agent run is cancelled — starting a new chat implies abandoning the old one. */
     fun newChat() {
         agentJob?.cancel()
         agentJob = null
+        _state.update { it.copy(running = false, approval = null, streamingText = "", pendingToolCalls = emptyMap()) }
         container.setActiveThread(-1L)
+    }
+
+    /** Cancel the in-flight agent run, if any. */
+    fun cancelAgent() {
+        agentJob?.cancel()
+        agentJob = null
+        _state.update { it.copy(running = false, approval = null) }
     }
 
     fun sendUserMessage(text: String, image: Pair<String, String>? = null) {
@@ -171,7 +180,9 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         if (text.isNotBlank()) blocks.add(Block.Text(text))
         val convMsg = ConvMessage(Role.User, blocks)
         conversation.add(convMsg)
-        agentJob = viewModelScope.launch {
+        // Run on the Application-level scope so the in-flight LLM stream survives
+        // ChatViewModel teardown (e.g. navigation away from the chat screen).
+        agentJob = container.appScope.launch {
             // Create thread if none active
             var threadId = container.activeThreadId.value
             if (threadId <= 0) {
