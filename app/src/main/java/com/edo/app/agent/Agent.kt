@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Decision returned by the approval gate for a pending tool call.
@@ -175,5 +178,87 @@ fun buildSystemPrompt(ws: Workspace): String {
         out.append("\n\n# Project instructions (AGENTS.md)\n\n")
         out.append(agentsMd.trim())
     }
+    val skills = discoverSkills(ws)
+    if (skills.isNotEmpty()) {
+        out.append("\n\n# Available skills\n\n")
+        out.append("These are markdown playbooks the user has authored for this project. ")
+        out.append("When a skill seems relevant to the user's request, call the load_skill tool with its name to read the full instructions before acting.\n\n")
+        for (s in skills) {
+            out.append("- **${s.name}** — ${s.description}\n")
+        }
+    }
     return out.toString()
+}
+
+data class SkillInfo(val name: String, val description: String, val path: String)
+
+/** Discover skill markdown files under .edo/skills/ (or .agents/skills/). */
+fun discoverSkills(ws: Workspace): List<SkillInfo> {
+    val roots = listOf(".edo/skills", ".agents/skills")
+    val out = mutableListOf<SkillInfo>()
+    for (root in roots) {
+        val entries = ws.ls(root) ?: continue
+        for (e in entries) {
+            if (e.isDir || !e.name.endsWith(".md", ignoreCase = true)) continue
+            val path = "$root/${e.name}"
+            val content = ws.read(path) ?: continue
+            val name = e.name.removeSuffix(".md").removeSuffix(".MD")
+            val description = extractSkillDescription(content) ?: "(no description)"
+            out.add(SkillInfo(name = name, description = description, path = path))
+        }
+    }
+    return out.sortedBy { it.name }
+}
+
+/** Extract a one-line description from a skill file. Looks for YAML frontmatter
+ *  `description:` first, then the first non-heading paragraph. */
+fun extractSkillDescription(content: String): String? {
+    val lines = content.lineSequence().toList()
+    if (lines.firstOrNull()?.trim() == "---") {
+        var i = 1
+        while (i < lines.size && lines[i].trim() != "---") {
+            val line = lines[i]
+            val idx = line.indexOf(':')
+            if (idx > 0) {
+                val key = line.substring(0, idx).trim()
+                if (key.equals("description", ignoreCase = true)) {
+                    val v = line.substring(idx + 1).trim().trim('"', '\'')
+                    if (v.isNotBlank()) return v.take(240)
+                }
+            }
+            i++
+        }
+    }
+    for (line in lines) {
+        val t = line.trim()
+        if (t.isEmpty() || t.startsWith("#") || t.startsWith("---")) continue
+        return t.take(240)
+    }
+    return null
+}
+
+/** Tool that loads the full content of a discovered skill by name. */
+class LoadSkillTool(private val ws: Workspace) : Tool {
+    override val spec = com.edo.app.llm.ToolSpec(
+        name = "load_skill",
+        description = "Read the full instructions for a skill listed in the system prompt. Provide the skill's name (without .md extension).",
+        parametersJson = """{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}""",
+    )
+
+    override suspend fun invoke(argsJson: String): ToolResult {
+        val obj = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(argsJson).jsonObject
+        }.getOrElse { kotlinx.serialization.json.JsonObject(emptyMap()) }
+        val name = obj["name"]?.jsonPrimitive?.contentOrNull
+            ?: return ToolResult("missing 'name'", isError = true)
+        val skills = discoverSkills(ws)
+        val match = skills.firstOrNull { it.name.equals(name, ignoreCase = true) }
+            ?: return ToolResult(
+                "skill '$name' not found. Available: ${skills.joinToString(", ") { it.name }}",
+                isError = true,
+            )
+        val content = ws.read(match.path)
+            ?: return ToolResult("could not read ${match.path}", isError = true)
+        return ToolResult(content)
+    }
 }

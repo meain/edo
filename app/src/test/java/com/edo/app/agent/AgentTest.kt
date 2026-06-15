@@ -180,6 +180,50 @@ class AgentTest {
     }
 
     @Test
+    fun discoverSkillsFindsMarkdownFiles() {
+        val ws = InMemoryWorkspace(
+            mapOf(
+                ".edo/skills/refactor.md" to "---\ndescription: Refactor tools\n---\n# Refactor\nbody",
+                ".edo/skills/explain.md" to "# Explain\nDescribes things in plain language.",
+            )
+        )
+        val skills = discoverSkills(ws)
+        assertEquals(2, skills.size)
+        assertEquals("explain", skills[0].name)
+        assertTrue(skills[0].description.contains("Describes"))
+        assertEquals("refactor", skills[1].name)
+        assertEquals("Refactor tools", skills[1].description)
+    }
+
+    @Test
+    fun loadSkillToolReturnsFullContent() = runTest {
+        val ws = InMemoryWorkspace(
+            mapOf(".edo/skills/foo.md" to "# Foo\nrun foo")
+        )
+        val r = LoadSkillTool(ws).invoke("""{"name":"foo"}""")
+        assertTrue(!r.isError)
+        assertTrue(r.content.contains("run foo"))
+    }
+
+    @Test
+    fun loadSkillToolErrorsWhenMissing() = runTest {
+        val ws = InMemoryWorkspace()
+        val r = LoadSkillTool(ws).invoke("""{"name":"nope"}""")
+        assertTrue(r.isError)
+    }
+
+    @Test
+    fun buildSystemPromptListsSkills() {
+        val ws = InMemoryWorkspace(
+            mapOf(".edo/skills/foo.md" to "---\ndescription: Foo runner\n---\nbody")
+        )
+        val prompt = buildSystemPrompt(ws)
+        assertTrue(prompt.contains("Available skills"))
+        assertTrue(prompt.contains("foo"))
+        assertTrue(prompt.contains("Foo runner"))
+    }
+
+    @Test
     fun llmFailureFinishesAgentRun() = runTest {
         val script = listOf(
             listOf(LlmEvent.Failure("boom")),

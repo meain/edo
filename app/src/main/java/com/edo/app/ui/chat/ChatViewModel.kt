@@ -11,6 +11,7 @@ import com.edo.app.agent.EditFileTool
 import com.edo.app.agent.GrepTool
 import com.edo.app.agent.HttpRequestTool
 import com.edo.app.agent.KtorHttpFetcher
+import com.edo.app.agent.LoadSkillTool
 import com.edo.app.agent.LsTool
 import com.edo.app.agent.ReadFileTool
 import com.edo.app.agent.FileWorkspace
@@ -236,6 +237,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 LsTool(ws),
                 GrepTool(ws),
                 HttpRequestTool(KtorHttpFetcher(container.http)),
+                LoadSkillTool(ws),
             )
         )
         val llm: LlmClient = when (settings.provider) {
