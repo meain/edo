@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
@@ -125,6 +126,19 @@ fun ChatScreen(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) pendingImage = readImageAsBase64(context.contentResolver, uri)
+    }
+
+    // Camera capture: write to a cacheDir file via FileProvider, then read it
+    // back as base64 once the camera app reports success.
+    var pendingCaptureUri by remember { mutableStateOf<Uri?>(null) }
+    val takePhoto = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingCaptureUri
+        if (success && uri != null) {
+            pendingImage = readImageAsBase64(context.contentResolver, uri)
+        }
+        pendingCaptureUri = null
     }
 
     // --- Message list state (hoisted so bottomBar LaunchedEffect can share it) ---
@@ -346,6 +360,22 @@ fun ChatScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        IconButton(
+                            onClick = {
+                                val uri = createCaptureUri(context)
+                                if (uri != null) {
+                                    pendingCaptureUri = uri
+                                    takePhoto.launch(uri)
+                                }
+                            },
+                            modifier = Modifier.padding(bottom = 2.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.PhotoCamera,
+                                contentDescription = "Take photo",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         TextField(
                             value = input,
                             onValueChange = { input = it },
@@ -475,12 +505,15 @@ private fun NoProjectPlaceholder(onOpenProjects: () -> Unit) {
 }
 
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(
     msg: UiMessage,
     expandedIds: MutableMap<String, Boolean>,
     toolResults: Map<String, Block.ToolResult>,
 ) {
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     when (msg.role) {
         Role.User -> {
             val textBlocks = msg.blocks.filterIsInstance<Block.Text>()
@@ -497,6 +530,15 @@ private fun MessageBubble(
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
                     tonalElevation = 1.dp,
+                    modifier = Modifier.combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            clipboard.setText(AnnotatedString(text))
+                            android.widget.Toast
+                                .makeText(context, "Copied message", android.widget.Toast.LENGTH_SHORT)
+                                .show()
+                        },
+                    ),
                 ) {
                     Text(
                         text = text,
@@ -735,10 +777,24 @@ private fun TypingDots() {
 }
 
 private fun readImageAsBase64(resolver: ContentResolver, uri: Uri): Pair<String, String>? {
-    val type = resolver.getType(uri) ?: "image/png"
+    val type = resolver.getType(uri) ?: "image/jpeg"
     val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
     val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
     return type to b64
+}
+
+/** Create a content:// URI in our app's cacheDir/captures/ for the camera
+ *  intent to write the photo to. */
+private fun createCaptureUri(context: android.content.Context): Uri? {
+    return runCatching {
+        val dir = java.io.File(context.cacheDir, "captures").apply { mkdirs() }
+        val file = java.io.File(dir, "photo_${System.currentTimeMillis()}.jpg")
+        androidx.core.content.FileProvider.getUriForFile(
+            context,
+            context.packageName + ".fileprovider",
+            file,
+        )
+    }.getOrNull()
 }
 
 /** Map tool name + raw args JSON to (label, inline detail) for the chat card header.
