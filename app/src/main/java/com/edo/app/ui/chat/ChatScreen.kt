@@ -35,8 +35,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Error
@@ -45,6 +47,9 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -83,6 +88,7 @@ import com.edo.app.EdoApp
 import com.edo.app.agent.ApprovalDecision
 import com.edo.app.llm.Block
 import com.edo.app.llm.Role
+import kotlinx.serialization.json.contentOrNull
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -531,19 +537,36 @@ private fun CompletedToolCard(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    if (isError) Icons.Filled.Error else Icons.Filled.CheckCircle,
+                    iconForTool(name, isError),
                     null,
                     modifier = Modifier.size(14.dp),
                     tint = if (isError) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.tertiary,
                 )
                 Spacer(Modifier.width(6.dp))
-                Text(
-                    name,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Medium,
+                val (label, detail) = toolHeader(name, argsJson)
+                Row(
                     modifier = Modifier.weight(1f),
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    if (detail.isNotBlank()) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
                 Icon(
                     if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                     null,
@@ -630,4 +653,52 @@ private fun readImageAsBase64(resolver: ContentResolver, uri: Uri): Pair<String,
     val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
     val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
     return type to b64
+}
+
+/** Map tool name + raw args JSON to (label, inline detail) for the chat card header. */
+internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
+    val args = runCatching {
+        kotlinx.serialization.json.Json.parseToJsonElement(argsJson) as kotlinx.serialization.json.JsonObject
+    }.getOrNull()
+    fun s(key: String): String? =
+        (args?.get(key) as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    val detail = when (name) {
+        "read_file", "write_file", "edit_file" -> s("path") ?: ""
+        "ls" -> s("path") ?: "/"
+        "grep" -> {
+            val pattern = s("pattern") ?: ""
+            val path = s("path")
+            if (path.isNullOrBlank()) "\"$pattern\"" else "\"$pattern\" in $path"
+        }
+        "http_request" -> {
+            val method = s("method")?.uppercase() ?: "GET"
+            val url = s("url") ?: ""
+            "$method $url"
+        }
+        "load_skill" -> s("name") ?: ""
+        else -> ""
+    }
+    val label = when (name) {
+        "read_file" -> "Read"
+        "write_file" -> "Write"
+        "edit_file" -> "Edit"
+        "ls" -> "List"
+        "grep" -> "Grep"
+        "http_request" -> "HTTP"
+        "load_skill" -> "Skill"
+        else -> name
+    }
+    return label to detail
+}
+
+internal fun iconForTool(name: String, isError: Boolean): androidx.compose.ui.graphics.vector.ImageVector = when {
+    isError -> Icons.Filled.Error
+    name == "read_file" -> Icons.AutoMirrored.Filled.MenuBook
+    name == "write_file" -> Icons.Filled.Save
+    name == "edit_file" -> Icons.Filled.Edit
+    name == "ls" -> Icons.Filled.Folder
+    name == "grep" -> Icons.Filled.Search
+    name == "http_request" -> Icons.Filled.Language
+    name == "load_skill" -> Icons.Filled.AutoAwesome
+    else -> Icons.Filled.CheckCircle
 }
