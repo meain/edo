@@ -4,15 +4,13 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Terminal prompt chevron > -->
     <path
-        android:strokeColor="#22D3EE"
+        android:strokeColor="#FFFFFF"
         android:strokeWidth="9"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:pathData="M 38,38 L 58,54 L 38,70" />
-    <!-- Cursor underscore -->
     <path
-        android:fillColor="#A5F3FC"
+        android:fillColor="#FFFFFF"
         android:pathData="M 50,70 L 78,70 A 2.5,2.5 0 0 1 80.5,72.5 L 80.5,74.5 A 2.5,2.5 0 0 1 78,77 L 50,77 A 2.5,2.5 0 0 1 47.5,74.5 L 47.5,72.5 A 2.5,2.5 0 0 1 50,70 Z" />
 </vector>
