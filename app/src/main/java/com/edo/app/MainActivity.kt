@@ -19,6 +19,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.edo.app.ui.chat.ChatScreen
+import com.edo.app.ui.files.FilesScreen
 import com.edo.app.ui.projects.ProjectsScreen
 import com.edo.app.ui.settings.SettingsScreen
 import com.edo.app.ui.threads.ThreadsScreen
@@ -42,6 +43,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenSettings = { nav.navigate("settings") },
                                 onOpenProjects = { nav.navigate("projects") },
                                 onOpenThreads = { nav.navigate("threads") },
+                                onOpenFiles = { nav.navigate("files") },
                             )
                         }
                         composable("projects") {
@@ -52,6 +54,12 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("threads") {
                             ThreadsScreen(
+                                container = container,
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
+                        composable("files") {
+                            FilesScreen(
                                 container = container,
                                 onBack = { nav.popBackStack() },
                             )

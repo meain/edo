@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
@@ -101,6 +102,7 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
     onOpenProjects: () -> Unit,
     onOpenThreads: () -> Unit,
+    onOpenFiles: () -> Unit,
 ) {
     val context = LocalContext.current
     val vm: ChatViewModel = viewModel(
@@ -182,6 +184,9 @@ fun ChatScreen(
                 },
                 actions = {
                     if (state.currentProject != null) {
+                        IconButton(onClick = onOpenFiles) {
+                            Icon(Icons.Filled.FolderOpen, contentDescription = "Files")
+                        }
                         IconButton(onClick = onOpenThreads) {
                             Icon(Icons.Filled.History, contentDescription = "Chat history")
                         }
