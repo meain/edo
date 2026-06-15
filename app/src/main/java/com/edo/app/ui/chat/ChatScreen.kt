@@ -647,7 +647,7 @@ private fun CompletedToolCard(
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
@@ -741,13 +741,18 @@ private fun readImageAsBase64(resolver: ContentResolver, uri: Uri): Pair<String,
     return type to b64
 }
 
-/** Map tool name + raw args JSON to (label, inline detail) for the chat card header. */
+/** Map tool name + raw args JSON to (label, inline detail) for the chat card header.
+ *  Works on partial/streaming JSON: when the full object can't be parsed yet,
+ *  falls back to a regex extract so the filename appears as soon as the model
+ *  has emitted the relevant key/value pair. */
 internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
     val args = runCatching {
         kotlinx.serialization.json.Json.parseToJsonElement(argsJson) as kotlinx.serialization.json.JsonObject
     }.getOrNull()
-    fun s(key: String): String? =
-        (args?.get(key) as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    fun s(key: String): String? {
+        (args?.get(key) as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.let { return it }
+        return extractPartialString(argsJson, key)
+    }
     val detail = when (name) {
         "read_file", "write_file", "edit_file", "delete_file" -> s("path") ?: ""
         "copy_file" -> {
@@ -784,6 +789,20 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
         else -> name
     }
     return label to detail
+}
+
+/** Best-effort lookup of a string field inside a partial JSON object — handles
+ *  the case where streaming hasn't finished yet so the object isn't valid JSON. */
+internal fun extractPartialString(partial: String, field: String): String? {
+    if (partial.isBlank()) return null
+    val key = "\"" + Regex.escape(field) + "\""
+    val regex = Regex(key + "\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)(?:\"|\\z)")
+    val raw = regex.find(partial)?.groupValues?.getOrNull(1) ?: return null
+    return raw
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
 }
 
 internal fun iconForTool(name: String, isError: Boolean): androidx.compose.ui.graphics.vector.ImageVector = when {
