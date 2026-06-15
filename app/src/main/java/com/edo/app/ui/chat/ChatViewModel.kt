@@ -7,6 +7,7 @@ import com.edo.app.AppContainer
 import com.edo.app.agent.Agent
 import com.edo.app.agent.ApprovalDecision
 import com.edo.app.agent.ApprovalGate
+import com.edo.app.agent.EditFileTool
 import com.edo.app.agent.GrepTool
 import com.edo.app.agent.HttpRequestTool
 import com.edo.app.agent.KtorHttpFetcher
@@ -230,6 +231,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
             listOf(
                 ReadFileTool(ws),
                 WriteFileTool(ws),
+                EditFileTool(ws),
                 LsTool(ws),
                 GrepTool(ws),
                 HttpRequestTool(KtorHttpFetcher(container.http)),

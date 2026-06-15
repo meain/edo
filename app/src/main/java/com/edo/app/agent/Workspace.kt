@@ -39,13 +39,30 @@ class SafWorkspace(
     override fun write(path: String, content: String): Boolean {
         val r = root ?: return false
         val (dir, name) = walkOrCreateDirs(r, path) ?: return false
-        val existing = dir.findFile(name)
-        val target = existing ?: dir.createFile("text/plain", name) ?: return false
+        val target = dir.findFile(name)
+            ?: dir.createFile(mimeFor(name), name)
+            ?: return false
         val resolver = context.contentResolver
         return resolver.openOutputStream(target.uri, "wt")?.use { out: OutputStream ->
             out.write(content.toByteArray(Charsets.UTF_8))
             true
         } ?: false
+    }
+
+    private fun mimeFor(name: String): String {
+        // Using "text/plain" makes SAF append a .txt extension when displayName has none.
+        // application/octet-stream keeps the name verbatim for files like "Makefile".
+        val dot = name.lastIndexOf('.')
+        if (dot <= 0) return "application/octet-stream"
+        return when (name.substring(dot + 1).lowercase()) {
+            "txt", "md", "markdown" -> "text/plain"
+            "json" -> "application/json"
+            "xml" -> "application/xml"
+            "html", "htm" -> "text/html"
+            "css" -> "text/css"
+            "js", "ts", "tsx", "jsx" -> "text/javascript"
+            else -> "application/octet-stream"
+        }
     }
 
     override fun ls(path: String): List<Workspace.Entry>? {

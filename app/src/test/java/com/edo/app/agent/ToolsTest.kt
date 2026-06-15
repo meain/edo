@@ -29,6 +29,56 @@ class ToolsTest {
         val r = WriteFileTool(ws).invoke("""{"path":"dir/b.txt","content":"yo"}""")
         assertFalse(r.isError)
         assertEquals("yo", ws.read("dir/b.txt"))
+        assertTrue("expected 'created' verb in: ${r.content}", r.content.contains("created"))
+    }
+
+    @Test
+    fun writeFileOverwritesExisting() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.txt" to "old"))
+        val r = WriteFileTool(ws).invoke("""{"path":"a.txt","content":"new"}""")
+        assertFalse(r.isError)
+        assertEquals("new", ws.read("a.txt"))
+        assertTrue("expected 'overwrote' verb in: ${r.content}", r.content.contains("overwrote"))
+    }
+
+    @Test
+    fun editFileReplacesUniqueOccurrence() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.kt" to "val x = 1\nval y = 2\n"))
+        val r = EditFileTool(ws).invoke("""{"path":"a.kt","old_string":"val x = 1","new_string":"val x = 42"}""")
+        assertFalse(r.isError)
+        assertEquals("val x = 42\nval y = 2\n", ws.read("a.kt"))
+    }
+
+    @Test
+    fun editFileRejectsAmbiguous() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.kt" to "foo\nfoo\n"))
+        val r = EditFileTool(ws).invoke("""{"path":"a.kt","old_string":"foo","new_string":"bar"}""")
+        assertTrue(r.isError)
+        assertTrue(r.content.contains("multiple"))
+    }
+
+    @Test
+    fun editFileReplaceAllChangesEvery() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.kt" to "foo\nfoo\nfoo\n"))
+        val r = EditFileTool(ws).invoke("""{"path":"a.kt","old_string":"foo","new_string":"bar","replace_all":"true"}""")
+        assertFalse(r.isError)
+        assertEquals("bar\nbar\nbar\n", ws.read("a.kt"))
+        assertTrue(r.content.contains("3"))
+    }
+
+    @Test
+    fun editFileMissingFileIsError() = runTest {
+        val ws = InMemoryWorkspace()
+        val r = EditFileTool(ws).invoke("""{"path":"a.kt","old_string":"x","new_string":"y"}""")
+        assertTrue(r.isError)
+    }
+
+    @Test
+    fun editFileNotFoundOldStringIsError() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.kt" to "abc"))
+        val r = EditFileTool(ws).invoke("""{"path":"a.kt","old_string":"zzz","new_string":"y"}""")
+        assertTrue(r.isError)
+        assertTrue(r.content.contains("not found"))
     }
 
     @Test

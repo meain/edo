@@ -44,7 +44,7 @@ class ReadFileTool(private val ws: Workspace) : Tool {
 class WriteFileTool(private val ws: Workspace) : Tool {
     override val spec = ToolSpec(
         name = "write_file",
-        description = "Write or overwrite a text file under the workspace.",
+        description = "Create a new file OR overwrite an existing one with the given content. Use this when replacing the entire file content; for partial edits prefer the 'edit_file' tool.",
         parametersJson = """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}""",
     )
 
@@ -52,9 +52,62 @@ class WriteFileTool(private val ws: Workspace) : Tool {
         val args = parseArgs(argsJson)
         val path = args.str("path") ?: return ToolResult("missing 'path'", isError = true)
         val content = args.str("content") ?: return ToolResult("missing 'content'", isError = true)
+        val existed = ws.read(path) != null
         val ok = ws.write(path, content)
-        return if (ok) ToolResult("wrote ${content.length} chars to $path")
-        else ToolResult("failed to write $path", isError = true)
+        if (!ok) return ToolResult("failed to write $path", isError = true)
+        val verb = if (existed) "overwrote" else "created"
+        return ToolResult("$verb $path (${content.length} chars)")
+    }
+}
+
+class EditFileTool(private val ws: Workspace) : Tool {
+    override val spec = ToolSpec(
+        name = "edit_file",
+        description = "Replace exact text within an existing file. 'old_string' must match exactly (whitespace included). If 'replace_all' is false (default), 'old_string' must be unique within the file — otherwise the edit is rejected and you should include more surrounding context.",
+        parametersJson = """{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["path","old_string","new_string"]}""",
+    )
+
+    override suspend fun invoke(argsJson: String): ToolResult {
+        val args = parseArgs(argsJson)
+        val path = args.str("path") ?: return ToolResult("missing 'path'", isError = true)
+        val oldStr = args.str("old_string") ?: return ToolResult("missing 'old_string'", isError = true)
+        val newStr = args.str("new_string") ?: return ToolResult("missing 'new_string'", isError = true)
+        val replaceAll = args["replace_all"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+        if (oldStr.isEmpty()) return ToolResult("'old_string' must be non-empty", isError = true)
+        if (oldStr == newStr) return ToolResult("no-op: old_string equals new_string", isError = true)
+        val current = ws.read(path) ?: return ToolResult("not found: $path", isError = true)
+        val first = current.indexOf(oldStr)
+        if (first < 0) return ToolResult("old_string not found in $path", isError = true)
+        val second = current.indexOf(oldStr, first + 1)
+        val updated: String
+        val occ: Int
+        if (replaceAll) {
+            occ = occurrences(current, oldStr)
+            updated = current.replace(oldStr, newStr)
+        } else {
+            if (second >= 0) {
+                return ToolResult(
+                    "old_string appears multiple times in $path; include more surrounding context or set replace_all=true",
+                    isError = true,
+                )
+            }
+            occ = 1
+            updated = current.replaceRange(first, first + oldStr.length, newStr)
+        }
+        val ok = ws.write(path, updated)
+        if (!ok) return ToolResult("failed to write $path", isError = true)
+        return ToolResult("edited $path ($occ replacement${if (occ == 1) "" else "s"})")
+    }
+
+    private fun occurrences(haystack: String, needle: String): Int {
+        if (needle.isEmpty()) return 0
+        var n = 0
+        var idx = haystack.indexOf(needle)
+        while (idx >= 0) {
+            n++
+            idx = haystack.indexOf(needle, idx + needle.length)
+        }
+        return n
     }
 }
 
