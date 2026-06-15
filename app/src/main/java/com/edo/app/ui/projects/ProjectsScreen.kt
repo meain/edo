@@ -214,11 +214,7 @@ private fun ProjectRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val folderLabel = project.workspaceUri
-                    .substringAfterLast("%3A")
-                    .substringAfterLast("/")
-                    .replace("%20", " ")
-                    .ifBlank { project.workspaceUri.take(40) }
+                val folderLabel = humanWorkspacePath(project.workspaceUri)
                 Text(
                     text = folderLabel,
                     style = MaterialTheme.typography.labelSmall,
@@ -307,9 +303,7 @@ private fun CreateProjectSheet(
                 Text("Pick folder in /sdcard/Edo/")
             }
         } else {
-            val label = workspaceUri
-                .substringAfterLast("%3A").substringAfterLast("%2F").substringAfterLast("/")
-                .replace("%20", " ").ifBlank { "Folder selected" }
+            val label = humanWorkspacePath(workspaceUri).ifBlank { "Folder selected" }
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer,
                 shape = MaterialTheme.shapes.small,
@@ -347,4 +341,29 @@ private fun CreateProjectSheet(
             ) { Text("Create") }
         }
     }
+}
+
+/** Render a workspace URI as a human-readable filesystem-style path.
+ *  - SAF tree URIs: keeps the slashes from the document id (e.g. "Edo/Ola")
+ *  - File paths: returned as-is (e.g. "/sdcard/Edo/Ola"), with /sdcard stripped
+ *  Falls back to a trimmed raw URI if the format isn't recognised. */
+internal fun humanWorkspacePath(workspaceUri: String): String {
+    if (workspaceUri.isBlank()) return ""
+    // file:// or raw /sdcard/...
+    if (workspaceUri.startsWith("/")) {
+        return workspaceUri.removePrefix("/sdcard/").ifBlank { workspaceUri }
+    }
+    if (workspaceUri.startsWith("file://")) {
+        return android.net.Uri.parse(workspaceUri).path
+            ?.removePrefix("/sdcard/")
+            ?.ifBlank { workspaceUri }
+            ?: workspaceUri
+    }
+    // SAF tree URI: content://.../tree/<documentId>
+    // documentId looks like "primary:Edo/Ola" once decoded.
+    val docId = workspaceUri.substringAfterLast("/tree/")
+    val decoded = runCatching { java.net.URLDecoder.decode(docId, "UTF-8") }
+        .getOrElse { docId }
+    // Drop the volume prefix ("primary:") for compactness.
+    return decoded.substringAfter(':', decoded)
 }
