@@ -1,7 +1,9 @@
 package com.edo.app
 
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -27,7 +29,12 @@ import com.edo.app.ui.threads.ThreadsScreen
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Fully transparent system bars (no scrim) so the Compose TopAppBar /
+        // bottom input bar paint right up to the screen edges without a seam.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+        )
         val container = (application as EdoApp).container
         setContent {
             val isDark = isSystemInDarkTheme()
