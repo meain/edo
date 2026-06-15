@@ -7,6 +7,9 @@ import com.edo.app.AppContainer
 import com.edo.app.agent.Agent
 import com.edo.app.agent.ApprovalDecision
 import com.edo.app.agent.ApprovalGate
+import com.edo.app.agent.CopyFileTool
+import com.edo.app.agent.DateTimeTool
+import com.edo.app.agent.DeleteFileTool
 import com.edo.app.agent.EditFileTool
 import com.edo.app.agent.GrepTool
 import com.edo.app.agent.HttpRequestTool
@@ -152,8 +155,9 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         for (m in loaded) conversation.add(ConvMessage(m.role, m.blocks))
         persistedCount = conversation.size
         titleSet = thread.title != "New chat" && rows.isNotEmpty()
-        val visible = loaded.filter { it.role != Role.User || it.blocks.any { b -> b !is Block.ToolResult } }
-        _state.value = ChatUiState(currentProject = project, currentThread = thread, messages = visible)
+        // Keep tool_result-only messages in state so the UI can look up results
+        // for each assistant tool_use block. The UI filters them from display.
+        _state.value = ChatUiState(currentProject = project, currentThread = thread, messages = loaded)
     }
 
     /** Clear active thread to show empty "new chat" state. A new ThreadEntity is created on first send.
@@ -245,9 +249,12 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 ReadFileTool(ws),
                 WriteFileTool(ws),
                 EditFileTool(ws),
+                DeleteFileTool(ws),
+                CopyFileTool(ws),
                 LsTool(ws),
                 GrepTool(ws),
                 HttpRequestTool(KtorHttpFetcher(container.http)),
+                DateTimeTool(),
                 LoadSkillTool(ws),
             )
         )
@@ -331,9 +338,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         var uiMsgs = _state.value.messages
         for (msg in newItems) {
             val rowId = container.db.messages().insert(uiToRow(msg, threadId))
-            if (msg.role != Role.User || msg.blocks.any { it !is Block.ToolResult }) {
-                uiMsgs = uiMsgs + UiMessage(rowId, msg.role, msg.blocks)
-            }
+            uiMsgs = uiMsgs + UiMessage(rowId, msg.role, msg.blocks)
         }
         persistedCount = conversation.size
         _state.update { it.copy(messages = uiMsgs, streamingText = "", pendingToolCalls = emptyMap()) }

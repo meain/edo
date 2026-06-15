@@ -45,6 +45,8 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
@@ -55,6 +57,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -127,7 +130,23 @@ fun ChatScreen(
     // --- Message list state (hoisted so bottomBar LaunchedEffect can share it) ---
     val listState = rememberLazyListState()
 
-    val totalItems = state.messages.size +
+    // Index tool results by their tool_use id so completed assistant cards can
+    // display the result inline. Tool result blocks live on subsequent user
+    // messages that are otherwise filtered from display.
+    val toolResults: Map<String, Block.ToolResult> = remember(state.messages) {
+        buildMap {
+            for (msg in state.messages) {
+                for (b in msg.blocks) if (b is Block.ToolResult) put(b.toolUseId, b)
+            }
+        }
+    }
+    val visibleMessages = remember(state.messages) {
+        state.messages.filter { msg ->
+            msg.role != Role.User || msg.blocks.any { it !is Block.ToolResult }
+        }
+    }
+
+    val totalItems = visibleMessages.size +
             (if (state.streamingText.isNotEmpty()) 1 else 0) +
             (if (state.pendingToolCalls.isNotEmpty()) 1 else 0)
     val isImeVisible = WindowInsets.isImeVisible
@@ -258,8 +277,8 @@ fun ChatScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(state.messages, key = { it.id }) { msg ->
-                            MessageBubble(msg, expandedToolIds)
+                        items(visibleMessages, key = { it.id }) { msg ->
+                            MessageBubble(msg, expandedToolIds, toolResults)
                         }
                         if (state.streamingText.isNotEmpty()) {
                             item("streaming") {
@@ -457,7 +476,11 @@ private fun NoProjectPlaceholder(onOpenProjects: () -> Unit) {
 
 
 @Composable
-private fun MessageBubble(msg: UiMessage, expandedIds: MutableMap<String, Boolean>) {
+private fun MessageBubble(
+    msg: UiMessage,
+    expandedIds: MutableMap<String, Boolean>,
+    toolResults: Map<String, Block.ToolResult>,
+) {
     when (msg.role) {
         Role.User -> {
             val textBlocks = msg.blocks.filterIsInstance<Block.Text>()
@@ -500,13 +523,19 @@ private fun MessageBubble(msg: UiMessage, expandedIds: MutableMap<String, Boolea
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         for (t in toolUses) {
                             val expanded = expandedIds[t.id] == true
+                            val res = toolResults[t.id]
                             CompletedToolCard(
                                 name = t.name,
                                 argsJson = t.argsJson,
-                                result = null,
-                                isError = false,
+                                result = res?.content,
+                                isError = res?.isError == true,
                                 expanded = expanded,
                                 onToggle = { expandedIds[t.id] = !expanded },
+                                statusColor = when {
+                                    res?.isError == true -> MaterialTheme.colorScheme.errorContainer
+                                    res != null -> MaterialTheme.colorScheme.tertiaryContainer
+                                    else -> MaterialTheme.colorScheme.surfaceVariant
+                                },
                             )
                         }
                     }
@@ -720,7 +749,12 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
     fun s(key: String): String? =
         (args?.get(key) as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
     val detail = when (name) {
-        "read_file", "write_file", "edit_file" -> s("path") ?: ""
+        "read_file", "write_file", "edit_file", "delete_file" -> s("path") ?: ""
+        "copy_file" -> {
+            val src = s("source") ?: ""
+            val dst = s("dest") ?: ""
+            if (src.isBlank() && dst.isBlank()) "" else "$src → $dst"
+        }
         "ls" -> s("path") ?: "/"
         "grep" -> {
             val pattern = s("pattern") ?: ""
@@ -733,16 +767,20 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
             "$method $url"
         }
         "load_skill" -> s("name") ?: ""
+        "current_datetime" -> ""
         else -> ""
     }
     val label = when (name) {
         "read_file" -> "Read"
         "write_file" -> "Write"
         "edit_file" -> "Edit"
+        "delete_file" -> "Delete"
+        "copy_file" -> "Copy"
         "ls" -> "List"
         "grep" -> "Grep"
         "http_request" -> "HTTP"
         "load_skill" -> "Skill"
+        "current_datetime" -> "Time"
         else -> name
     }
     return label to detail
@@ -753,9 +791,12 @@ internal fun iconForTool(name: String, isError: Boolean): androidx.compose.ui.gr
     name == "read_file" -> Icons.AutoMirrored.Filled.MenuBook
     name == "write_file" -> Icons.Filled.Save
     name == "edit_file" -> Icons.Filled.Edit
+    name == "delete_file" -> Icons.Filled.DeleteOutline
+    name == "copy_file" -> Icons.Filled.ContentCopy
     name == "ls" -> Icons.Filled.Folder
     name == "grep" -> Icons.Filled.Search
     name == "http_request" -> Icons.Filled.Language
     name == "load_skill" -> Icons.Filled.AutoAwesome
+    name == "current_datetime" -> Icons.Filled.Schedule
     else -> Icons.Filled.CheckCircle
 }
