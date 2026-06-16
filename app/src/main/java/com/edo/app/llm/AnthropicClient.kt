@@ -97,12 +97,27 @@ class AnthropicClient(
             return obj.toString()
         }
 
-        internal fun buildMessagesArray(conversation: List<ConvMessage>): JsonArray = buildJsonArray {
+        internal fun buildMessagesArray(conversation: List<ConvMessage>): JsonArray {
+            // Coalesce consecutive messages of the same role so the API never sees
+            // two adjacent user or assistant turns (e.g. after stripping an orphaned
+            // assistant tool_use on reload, the preceding user turn and the new user
+            // message would otherwise be consecutive).
+            val coalesced = mutableListOf<ConvMessage>()
             for (msg in conversation) {
                 if (msg.role == Role.System) continue
-                addJsonObject {
-                    put("role", if (msg.role == Role.User) "user" else "assistant")
-                    put("content", buildContentArray(msg.blocks))
+                val last = coalesced.lastOrNull()
+                if (last != null && last.role == msg.role) {
+                    coalesced[coalesced.size - 1] = ConvMessage(last.role, last.blocks + msg.blocks)
+                } else {
+                    coalesced.add(msg)
+                }
+            }
+            return buildJsonArray {
+                for (msg in coalesced) {
+                    addJsonObject {
+                        put("role", if (msg.role == Role.User) "user" else "assistant")
+                        put("content", buildContentArray(msg.blocks))
+                    }
                 }
             }
         }

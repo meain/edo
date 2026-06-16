@@ -85,12 +85,20 @@ class OpenAIClient(
                     put("content", system)
                 }
             }
+            // Coalesce consecutive same-role messages (mirrors the Anthropic client fix).
+            val coalesced = mutableListOf<ConvMessage>()
             for (msg in conversation) {
+                if (msg.role == Role.System) continue
+                val last = coalesced.lastOrNull()
+                if (last != null && last.role == msg.role) {
+                    coalesced[coalesced.size - 1] = ConvMessage(last.role, last.blocks + msg.blocks)
+                } else {
+                    coalesced.add(msg)
+                }
+            }
+            for (msg in coalesced) {
                 when (msg.role) {
-                    Role.System -> addJsonObject {
-                        put("role", "system")
-                        put("content", textOnly(msg.blocks))
-                    }
+                    Role.System -> Unit
                     Role.User -> addUserMessages(msg.blocks)
                     Role.Assistant -> addAssistantMessage(msg.blocks)
                 }
