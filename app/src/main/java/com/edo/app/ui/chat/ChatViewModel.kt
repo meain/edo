@@ -1,7 +1,9 @@
 package com.edo.app.ui.chat
 
 import android.app.Application
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
+import com.edo.app.AgentForegroundService
 import androidx.lifecycle.viewModelScope
 import com.edo.app.AppContainer
 import com.edo.app.agent.Agent
@@ -320,6 +322,8 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         }
         val systemPrompt = buildSystemPrompt(ws)
         _state.update { it.copy(running = true, error = null) }
+        val svcIntent = Intent(getApplication(), AgentForegroundService::class.java)
+        getApplication<Application>().startForegroundService(svcIntent)
         try {
             Agent(llm, tools, gate, systemPrompt = systemPrompt).run(conversation).collect { ev -> handle(ev, threadId) }
         } catch (t: Throwable) {
@@ -327,6 +331,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 _state.update { it.copy(error = t.message ?: "Unknown error") }
             }
         } finally {
+            getApplication<Application>().stopService(svcIntent)
             _state.update { s ->
                 s.copy(
                     running = false,
