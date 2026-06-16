@@ -7,6 +7,7 @@ import com.edo.app.AppContainer
 import com.edo.app.agent.Agent
 import com.edo.app.agent.ApprovalDecision
 import com.edo.app.agent.ApprovalGate
+import com.edo.app.agent.AskUserQuestionTool
 import com.edo.app.agent.CopyFileTool
 import com.edo.app.agent.DateTimeTool
 import com.edo.app.agent.DeleteFileTool
@@ -61,6 +62,13 @@ data class PendingApproval(
     val deferred: CompletableDeferred<ApprovalDecision>,
 )
 
+data class PendingQuestion(
+    val id: String,
+    val question: String,
+    val options: List<String>,
+    val deferred: CompletableDeferred<String>,
+)
+
 data class UiMessage(
     val id: Long,
     val role: Role,
@@ -83,6 +91,7 @@ data class ChatUiState(
     val streamingText: String = "",
     val pendingToolCalls: Map<String, PendingToolUi> = emptyMap(),
     val approval: PendingApproval? = null,
+    val pendingQuestion: PendingQuestion? = null,
     val running: Boolean = false,
     val error: String? = null,
     val needsProject: Boolean = false,
@@ -233,6 +242,10 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         _state.value.approval?.deferred?.complete(decision)
     }
 
+    fun answerQuestion(answer: String) {
+        _state.value.pendingQuestion?.deferred?.complete(answer)
+    }
+
     fun dismissError() = _state.update { it.copy(error = null) }
 
     private suspend fun runAgent(threadId: Long) {
@@ -254,6 +267,14 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         } else {
             FileWorkspace(java.io.File(project.workspaceUri))
         }
+        val askUser: suspend (String, List<String>) -> String = { question, options ->
+            val deferred = CompletableDeferred<String>()
+            val id = "question_${System.currentTimeMillis()}"
+            _state.update { it.copy(pendingQuestion = PendingQuestion(id, question, options, deferred)) }
+            try { deferred.await() } finally {
+                _state.update { it.copy(pendingQuestion = null) }
+            }
+        }
         val tools = ToolRegistry(
             listOf(
                 ReadFileTool(ws),
@@ -266,6 +287,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 HttpRequestTool(KtorHttpFetcher(container.http)),
                 DateTimeTool(),
                 LoadSkillTool(ws),
+                AskUserQuestionTool(askUser),
             )
         )
         val llm: LlmClient = when (settings.provider) {

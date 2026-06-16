@@ -454,6 +454,77 @@ fun ChatScreen(
         }
     }
 
+    // Question sheet
+    val pendingQuestion = state.pendingQuestion
+    if (pendingQuestion != null) {
+        var customText by remember(pendingQuestion.id) { mutableStateOf("") }
+        var showCustom by remember(pendingQuestion.id) { mutableStateOf(false) }
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { /* non-dismissible — must pick an option */ },
+            sheetState = sheetState,
+        ) {
+            Column(
+                Modifier
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp)
+                    .windowInsetsPadding(WindowInsets.navigationBars),
+            ) {
+                Text("Question", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(4.dp))
+                Text(pendingQuestion.question, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(16.dp))
+                pendingQuestion.options.forEach { option ->
+                    Surface(
+                        onClick = { vm.answerQuestion(option) },
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    ) {
+                        Text(
+                            option,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+                Surface(
+                    onClick = { showCustom = !showCustom },
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                ) {
+                    Text(
+                        "Other…",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (showCustom) {
+                    Spacer(Modifier.height(8.dp))
+                    TextField(
+                        value = customText,
+                        onValueChange = { customText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Type your answer…") },
+                        singleLine = false,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = { vm.answerQuestion(customText) },
+                        enabled = customText.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Submit") }
+                }
+            }
+        }
+    }
+
     // Approval sheet
     val approval = state.approval
     if (approval != null) {

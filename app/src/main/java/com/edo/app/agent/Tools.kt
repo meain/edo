@@ -12,6 +12,7 @@ import io.ktor.http.ContentType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -242,6 +243,28 @@ class DateTimeTool(private val clock: () -> Long = System::currentTimeMillis) : 
             append("epoch: ").append(nowMs)
         }
         return ToolResult(out)
+    }
+}
+
+class AskUserQuestionTool(
+    private val ask: suspend (question: String, options: List<String>) -> String,
+) : Tool {
+    override val spec = ToolSpec(
+        name = "ask_user",
+        description = "Ask the user a question with a list of predefined options. The user can also type a custom answer. Use this when you need clarification and the likely answers are a known set.",
+        parametersJson = """{"type":"object","properties":{"question":{"type":"string","description":"The question to present to the user"},"options":{"type":"array","items":{"type":"string"},"description":"Predefined options for the user to pick from"}},"required":["question","options"]}""",
+    )
+
+    override suspend fun invoke(argsJson: String): ToolResult {
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
+        val question = args.str("question") ?: return ToolResult("missing 'question'", isError = true)
+        val optionsEl = args["options"] ?: return ToolResult("missing 'options'", isError = true)
+        val options = runCatching {
+            optionsEl.jsonArray.map { it.jsonPrimitive.content }
+        }.getOrElse { return ToolResult("'options' must be an array of strings", isError = true) }
+        if (options.isEmpty()) return ToolResult("'options' must not be empty", isError = true)
+        val answer = ask(question, options)
+        return ToolResult(answer)
     }
 }
 
