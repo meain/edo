@@ -14,6 +14,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -459,6 +461,7 @@ fun ChatScreen(
     if (pendingQuestion != null) {
         var customText by remember(pendingQuestion.id) { mutableStateOf("") }
         var showCustom by remember(pendingQuestion.id) { mutableStateOf(false) }
+        val focusRequester = remember(pendingQuestion.id) { FocusRequester() }
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = { /* non-dismissible — must pick an option */ },
@@ -468,45 +471,53 @@ fun ChatScreen(
                 Modifier
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 32.dp)
+                    .imePadding()
                     .windowInsetsPadding(WindowInsets.navigationBars),
             ) {
                 Text("Question", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(4.dp))
                 Text(pendingQuestion.question, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(16.dp))
-                pendingQuestion.options.forEach { option ->
+                if (!showCustom) {
+                    pendingQuestion.options.forEach { option ->
+                        Surface(
+                            onClick = { vm.answerQuestion(option) },
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        ) {
+                            Text(
+                                option,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    }
                     Surface(
-                        onClick = { vm.answerQuestion(option) },
+                        onClick = { showCustom = true },
                         shape = MaterialTheme.shapes.medium,
-                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        color = MaterialTheme.colorScheme.surface,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     ) {
                         Text(
-                            option,
+                            "Other…",
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                             style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                }
-                Surface(
-                    onClick = { showCustom = !showCustom },
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                ) {
-                    Text(
-                        "Other…",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (showCustom) {
-                    Spacer(Modifier.height(8.dp))
+                } else {
+                    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+                    TextButton(
+                        onClick = { showCustom = false; customText = "" },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                    ) {
+                        Text("← Back to options")
+                    }
                     TextField(
                         value = customText,
                         onValueChange = { customText = it },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                         placeholder = { Text("Type your answer…") },
                         singleLine = false,
                         colors = TextFieldDefaults.colors(
