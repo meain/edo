@@ -162,8 +162,17 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         }
         val rows = container.db.messages().listForThread(threadId)
         conversation.clear()
-        val loaded = rows.mapNotNull { rowToUi(it) }
+        var loaded = rows.mapNotNull { rowToUi(it) }
         for (m in loaded) conversation.add(ConvMessage(m.role, m.blocks))
+        // Strip any trailing assistant message with unanswered tool_use blocks — can
+        // happen if the app was killed while the agent was suspended mid-tool-call.
+        if (conversation.isNotEmpty() &&
+            conversation.last().role == Role.Assistant &&
+            conversation.last().blocks.any { it is Block.ToolUse }
+        ) {
+            conversation.removeAt(conversation.size - 1)
+            loaded = loaded.dropLast(1)
+        }
         persistedCount = conversation.size
         titleSet = thread.title != "New chat" && rows.isNotEmpty()
         // Keep tool_result-only messages in state so the UI can look up results
@@ -176,7 +185,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
     fun newChat() {
         agentJob?.cancel()
         agentJob = null
-        _state.update { it.copy(running = false, approval = null, streamingText = "", pendingToolCalls = emptyMap()) }
+        _state.update { it.copy(running = false, approval = null, pendingQuestion = null, streamingText = "", pendingToolCalls = emptyMap()) }
         container.setActiveThread(-1L)
     }
 
@@ -184,7 +193,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
     fun cancelAgent() {
         agentJob?.cancel()
         agentJob = null
-        _state.update { it.copy(running = false, approval = null) }
+        _state.update { it.copy(running = false, approval = null, pendingQuestion = null) }
     }
 
     /** Re-run the agent against the current conversation (after all auto-retries exhausted). */
@@ -198,6 +207,8 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
     fun sendUserMessage(text: String, image: Pair<String, String>? = null) {
         if (text.isBlank() && image == null) return
         val projectId = container.activeProjectId.value.takeIf { it > 0 } ?: return
+        agentJob?.cancel()
+        _state.update { it.copy(approval = null, pendingQuestion = null) }
         val blocks = mutableListOf<Block>()
         if (image != null) blocks.add(Block.Image(image.first, image.second))
         if (text.isNotBlank()) blocks.add(Block.Text(text))

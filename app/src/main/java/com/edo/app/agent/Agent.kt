@@ -161,6 +161,7 @@ class Agent(
                             ToolResult("unknown tool: ${acc.name}", isError = true)
                         } else {
                             runCatching { tool.invoke(argsJson) }.getOrElse {
+                                if (it is kotlinx.coroutines.CancellationException) throw it
                                 ToolResult("tool threw: ${it.message}", isError = true)
                             }
                         }
