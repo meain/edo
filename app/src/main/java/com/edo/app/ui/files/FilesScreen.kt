@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +32,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -293,6 +295,7 @@ private fun openWith(context: android.content.Context, ws: Workspace, path: Stri
 private fun FileView(path: String, content: String) {
     val isMarkdown = path.endsWith(".md", ignoreCase = true) ||
         path.endsWith(".markdown", ignoreCase = true)
+    val isCsv = path.endsWith(".csv", ignoreCase = true)
     Column(Modifier.fillMaxSize()) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
@@ -315,6 +318,8 @@ private fun FileView(path: String, content: String) {
             ) {
                 MarkdownText(text = content)
             }
+        } else if (isCsv) {
+            CsvView(content = content)
         } else {
             val hScroll = rememberScrollState()
             val vScroll = rememberScrollState()
@@ -333,6 +338,79 @@ private fun FileView(path: String, content: String) {
             }
         }
     }
+}
+
+@Composable
+private fun CsvView(content: String) {
+    val rows = remember(content) { parseCsv(content) }
+    if (rows.isEmpty()) return
+    val colCount = rows.maxOf { it.size }
+    val colWidth = 120.dp
+    val hScroll = rememberScrollState()
+    val vScroll = rememberScrollState()
+    Column(
+        Modifier
+            .fillMaxSize()
+            .horizontalScroll(hScroll)
+            .verticalScroll(vScroll),
+    ) {
+        Row(Modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
+            rows[0].forEach { cell ->
+                Text(
+                    cell,
+                    modifier = Modifier.width(colWidth).padding(horizontal = 8.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            repeat(colCount - rows[0].size) { Spacer(Modifier.width(colWidth)) }
+        }
+        HorizontalDivider()
+        rows.drop(1).forEachIndexed { index, row ->
+            Row(
+                Modifier.background(
+                    if (index % 2 == 0) MaterialTheme.colorScheme.surface
+                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                ),
+            ) {
+                row.forEach { cell ->
+                    Text(
+                        cell,
+                        modifier = Modifier.width(colWidth).padding(horizontal = 8.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                repeat(colCount - row.size) { Spacer(Modifier.width(colWidth)) }
+            }
+        }
+    }
+}
+
+private fun parseCsv(content: String): List<List<String>> =
+    content.lines().filter { it.isNotBlank() }.map { parseCsvLine(it) }
+
+private fun parseCsvLine(line: String): List<String> {
+    val result = mutableListOf<String>()
+    val current = StringBuilder()
+    var inQuotes = false
+    var i = 0
+    while (i < line.length) {
+        when (val c = line[i]) {
+            '"' -> if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+                current.append('"'); i++
+            } else inQuotes = !inQuotes
+            ',' -> if (inQuotes) current.append(c) else { result.add(current.toString()); current.clear() }
+            else -> current.append(c)
+        }
+        i++
+    }
+    result.add(current.toString())
+    return result
 }
 
 @Composable
