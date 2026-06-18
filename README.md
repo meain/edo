@@ -12,7 +12,7 @@ with optional per-tool approval gates.
   streaming + native tool use.
 - **Workspace tools**: `read_file`, `write_file`, `edit_file` (string
   replacement), `copy_file`, `delete_file`, `ls`, `grep`, `http_request`,
-  `current_datetime`, and `load_skill`.
+  `current_datetime`, `ask_user`, and `load_skill`.
 - **Projects + threads**: each project pins a workspace folder; threads
   are Claude-Code-style chat sessions scoped to a project.
 - **Per-project settings**: description and YOLO mode (auto-approve all
@@ -20,11 +20,17 @@ with optional per-tool approval gates.
 - **File browser**: built-in browser for the workspace folder with
   Markdown preview, long-press menu for "Open with…" (system chooser)
   and "Delete".
+- **Image input**: attach photos or screenshots from the gallery; sent
+  as multimodal content to the model.
 - **Skills**: drop Markdown files under `.edo/skills/` or
-  `.agents/skills/` in a workspace; the agent discovers them and can
-  `load_skill` on demand.
-- **AGENTS.md**: a top-level `AGENTS.md` in the workspace is included in
-  the system prompt.
+  `.agents/skills/` in a workspace (flat `.md` or
+  [agentskills.io](https://agentskills.io) folder format with `SKILL.md`);
+  the agent discovers them and can `load_skill` on demand. A built-in
+  `create-skill` skill helps scaffold new ones.
+- **AGENTS.md**: a top-level `AGENTS.md` (or `CLAUDE.md`) in the
+  workspace is included in the system prompt.
+- **Background execution**: a foreground service keeps the agent running
+  with a persistent notification while a turn is in progress.
 
 ## Build & install
 
