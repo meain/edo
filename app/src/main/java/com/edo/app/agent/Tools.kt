@@ -1,6 +1,7 @@
 package com.edo.app.agent
 
 import com.edo.app.llm.ToolSpec
+import kotlin.math.*
 import io.ktor.client.HttpClient
 import io.ktor.client.request.headers
 import io.ktor.client.request.request
@@ -318,5 +319,129 @@ class KtorHttpFetcher(private val http: HttpClient) : HttpFetcher {
         }
         val text = response.bodyAsText()
         return "HTTP ${response.status.value}\n$text"
+    }
+}
+
+class CalculatorTool : Tool {
+    override val spec = ToolSpec(
+        name = "calculator",
+        description = "Evaluate a mathematical expression. Supports +, -, *, /, ^ (power), parentheses, and functions: sqrt, abs, floor, ceil, round, sin, cos, tan, log (base-10), ln (natural log), exp. Constants: pi, e.",
+        parametersJson = """{"type":"object","properties":{"expression":{"type":"string","description":"The math expression to evaluate, e.g. '2 + 3 * 4' or 'sqrt(2) ^ 2'"}},"required":["expression"]}""",
+    )
+
+    override suspend fun invoke(argsJson: String): ToolResult {
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
+        val expression = args.str("expression") ?: return ToolResult("missing 'expression'", isError = true)
+        return try {
+            val result = MathEvaluator(expression.trim()).evaluate()
+            val formatted = if (!result.isNaN() && !result.isInfinite() &&
+                result == kotlin.math.floor(result) &&
+                result >= Long.MIN_VALUE.toDouble() && result <= Long.MAX_VALUE.toDouble()
+            ) result.toLong().toString() else result.toString()
+            ToolResult("$expression = $formatted")
+        } catch (e: Exception) {
+            ToolResult("error: ${e.message}", isError = true)
+        }
+    }
+}
+
+private class MathEvaluator(input: String) {
+    private val expr = input.replace("\\s+".toRegex(), "")
+    private var pos = 0
+
+    fun evaluate(): Double {
+        val result = parseExpr()
+        if (pos < expr.length) throw IllegalArgumentException("Unexpected character '${expr[pos]}' at position $pos")
+        return result
+    }
+
+    private fun parseExpr(): Double {
+        var result = parseTerm()
+        while (pos < expr.length && (expr[pos] == '+' || expr[pos] == '-')) {
+            val op = expr[pos++]
+            result = if (op == '+') result + parseTerm() else result - parseTerm()
+        }
+        return result
+    }
+
+    private fun parseTerm(): Double {
+        var result = parsePower()
+        while (pos < expr.length && (expr[pos] == '*' || expr[pos] == '/')) {
+            val op = expr[pos++]
+            val rhs = parsePower()
+            result = if (op == '/') {
+                if (rhs == 0.0) throw ArithmeticException("division by zero")
+                result / rhs
+            } else result * rhs
+        }
+        return result
+    }
+
+    private fun parsePower(): Double {
+        val base = parseUnary()
+        if (pos < expr.length && expr[pos] == '^') {
+            pos++
+            return base.pow(parsePower()) // right-associative
+        }
+        return base
+    }
+
+    private fun parseUnary(): Double {
+        if (pos < expr.length && expr[pos] == '-') { pos++; return -parseUnary() }
+        if (pos < expr.length && expr[pos] == '+') { pos++; return parseUnary() }
+        return parseAtom()
+    }
+
+    private fun parseAtom(): Double {
+        if (pos >= expr.length) throw IllegalArgumentException("Unexpected end of expression")
+        if (expr[pos] == '(') {
+            pos++
+            val result = parseExpr()
+            if (pos >= expr.length || expr[pos] != ')') throw IllegalArgumentException("Missing closing parenthesis")
+            pos++
+            return result
+        }
+        if (expr[pos].isLetter()) {
+            val start = pos
+            while (pos < expr.length && (expr[pos].isLetter() || expr[pos].isDigit())) pos++
+            val name = expr.substring(start, pos)
+            if (pos < expr.length && expr[pos] == '(') {
+                pos++
+                val arg = parseExpr()
+                if (pos >= expr.length || expr[pos] != ')') throw IllegalArgumentException("Missing ')' after $name(")
+                pos++
+                return applyFunc(name, arg)
+            }
+            return when (name.lowercase()) {
+                "pi" -> kotlin.math.PI
+                "e" -> kotlin.math.E
+                else -> throw IllegalArgumentException("Unknown identifier: $name")
+            }
+        }
+        val start = pos
+        while (pos < expr.length && (expr[pos].isDigit() || expr[pos] == '.')) pos++
+        if (pos < expr.length && (expr[pos] == 'e' || expr[pos] == 'E')) {
+            pos++
+            if (pos < expr.length && (expr[pos] == '+' || expr[pos] == '-')) pos++
+            while (pos < expr.length && expr[pos].isDigit()) pos++
+        }
+        if (pos == start) throw IllegalArgumentException("Expected number at position $pos")
+        return expr.substring(start, pos).toDouble()
+    }
+
+    private fun applyFunc(name: String, arg: Double): Double = when (name.lowercase()) {
+        "sqrt" -> kotlin.math.sqrt(arg)
+        "abs" -> kotlin.math.abs(arg)
+        "floor" -> kotlin.math.floor(arg)
+        "ceil" -> kotlin.math.ceil(arg)
+        "round" -> kotlin.math.round(arg).toDouble()
+        "sin" -> kotlin.math.sin(arg)
+        "cos" -> kotlin.math.cos(arg)
+        "tan" -> kotlin.math.tan(arg)
+        "log" -> kotlin.math.log10(arg)
+        "ln" -> kotlin.math.ln(arg)
+        "exp" -> kotlin.math.exp(arg)
+        "sign" -> kotlin.math.sign(arg)
+        else -> throw IllegalArgumentException("Unknown function: $name")
     }
 }
