@@ -72,6 +72,11 @@ data class PendingQuestion(
     val deferred: CompletableDeferred<String>,
 )
 
+data class QueuedMessage(
+    val text: String,
+    val image: Pair<String, String>? = null,
+)
+
 data class UiMessage(
     val id: Long,
     val role: Role,
@@ -102,6 +107,7 @@ data class ChatUiState(
     val retryingCause: String? = null,
     val canRetry: Boolean = false,
     val scrollVersion: Int = 0,
+    val queuedMessage: QueuedMessage? = null,
 )
 
 class ChatViewModel(app: Application, private val container: AppContainer) : AndroidViewModel(app) {
@@ -198,7 +204,17 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
     fun cancelAgent() {
         agentJob?.cancel()
         agentJob = null
-        _state.update { it.copy(running = false, approval = null, pendingQuestion = null) }
+        _state.update { it.copy(running = false, approval = null, pendingQuestion = null, queuedMessage = null) }
+    }
+
+    /** Queue a message to send after the current agent run completes. */
+    fun queueMessage(text: String, image: Pair<String, String>? = null) {
+        _state.update { it.copy(queuedMessage = QueuedMessage(text, image)) }
+    }
+
+    /** Discard any queued message. */
+    fun cancelQueue() {
+        _state.update { it.copy(queuedMessage = null) }
     }
 
     /** Re-run the agent against the current conversation (after all auto-retries exhausted). */
@@ -251,6 +267,24 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 it.copy(messages = it.messages + UiMessage(rowId, Role.User, blocks))
             }
             runAgent(threadId)
+
+            // Process any queued message after agent completes
+            while (true) {
+                val queued = _state.value.queuedMessage ?: break
+                _state.update { it.copy(queuedMessage = null) }
+                val queuedBlocks = buildList {
+                    if (queued.image != null) add(Block.Image(queued.image.first, queued.image.second))
+                    if (queued.text.isNotBlank()) add(Block.Text(queued.text))
+                }
+                if (queuedBlocks.isEmpty()) break
+                val currentThreadId = container.activeThreadId.value.takeIf { it > 0 } ?: break
+                val queuedMsg = ConvMessage(Role.User, queuedBlocks)
+                conversation.add(queuedMsg)
+                val queuedRowId = container.db.messages().insert(uiToRow(queuedMsg, currentThreadId))
+                persistedCount = conversation.size
+                _state.update { it.copy(messages = it.messages + UiMessage(queuedRowId, Role.User, queuedBlocks)) }
+                runAgent(currentThreadId)
+            }
         }
     }
 

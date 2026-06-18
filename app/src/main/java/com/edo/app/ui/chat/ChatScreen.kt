@@ -360,6 +360,33 @@ fun ChatScreen(
                         )
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
+                    state.queuedMessage?.let { queued ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "Queued: " + queued.text.take(50).let { if (queued.text.length > 50) "$it…" else it }.ifBlank { "[image]" },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                TextButton(
+                                    onClick = { vm.cancelQueue() },
+                                    modifier = Modifier.height(24.dp),
+                                ) {
+                                    Text("Cancel", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
                     if (pendingImage != null) {
                         AttachmentChip(
                             icon = Icons.Filled.Image,
@@ -418,41 +445,60 @@ fun ChatScreen(
                             ),
                         )
                         val hasContent = input.isNotBlank() || pendingImage != null || pendingTextFile != null
-                        IconButton(
-                            enabled = if (state.running) true else !state.needsProject && hasContent,
-                            onClick = {
-                                if (state.running) {
-                                    vm.cancelAgent()
-                                } else {
-                                    val composed = buildString {
-                                        pendingTextFile?.let { (filename, content) ->
-                                            append("Attached file `").append(filename).append("`:\n")
-                                            append("```\n").append(content).append("\n```\n\n")
-                                        }
-                                        append(input.trim())
-                                    }
-                                    vm.sendUserMessage(composed.trim(), pendingImage)
+                        val composed = buildString {
+                            pendingTextFile?.let { (filename, content) ->
+                                append("Attached file `").append(filename).append("`:\n")
+                                append("```\n").append(content).append("\n```\n\n")
+                            }
+                            append(input.trim())
+                        }
+                        if (state.running && hasContent) {
+                            // Queue button: agent is running but user has typed a message
+                            IconButton(
+                                onClick = {
+                                    vm.queueMessage(composed.trim(), pendingImage)
                                     input = ""
                                     pendingImage = null
                                     pendingTextFile = null
-                                }
-                            },
-                            modifier = Modifier.padding(bottom = 2.dp),
-                        ) {
-                            if (state.running) {
+                                },
+                                modifier = Modifier.padding(bottom = 2.dp),
+                            ) {
                                 Icon(
-                                    Icons.Filled.Stop,
-                                    contentDescription = "Stop",
+                                    Icons.Filled.Add,
+                                    contentDescription = "Queue message",
                                     tint = MaterialTheme.colorScheme.primary,
                                 )
-                            } else {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "Send",
-                                    tint = if (!state.needsProject && hasContent)
-                                        MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                            }
+                        } else {
+                            IconButton(
+                                enabled = if (state.running) true else !state.needsProject && hasContent,
+                                onClick = {
+                                    if (state.running) {
+                                        vm.cancelAgent()
+                                    } else {
+                                        vm.sendUserMessage(composed.trim(), pendingImage)
+                                        input = ""
+                                        pendingImage = null
+                                        pendingTextFile = null
+                                    }
+                                },
+                                modifier = Modifier.padding(bottom = 2.dp),
+                            ) {
+                                if (state.running) {
+                                    Icon(
+                                        Icons.Filled.Stop,
+                                        contentDescription = "Stop",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Send,
+                                        contentDescription = "Send",
+                                        tint = if (!state.needsProject && hasContent)
+                                            MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
