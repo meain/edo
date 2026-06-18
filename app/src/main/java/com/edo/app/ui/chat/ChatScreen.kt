@@ -360,14 +360,14 @@ fun ChatScreen(
                         )
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
-                    state.queuedMessage?.let { queued ->
+                    state.queuedMessages.forEachIndexed { index, queued ->
                         Surface(
                             color = MaterialTheme.colorScheme.secondaryContainer,
                             shape = MaterialTheme.shapes.small,
                             modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
@@ -379,8 +379,9 @@ fun ChatScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 TextButton(
-                                    onClick = { vm.cancelQueue() },
+                                    onClick = { vm.cancelQueue(index) },
                                     modifier = Modifier.height(24.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                 ) {
                                     Text("Cancel", style = MaterialTheme.typography.labelSmall)
                                 }

@@ -107,7 +107,7 @@ data class ChatUiState(
     val retryingCause: String? = null,
     val canRetry: Boolean = false,
     val scrollVersion: Int = 0,
-    val queuedMessage: QueuedMessage? = null,
+    val queuedMessages: List<QueuedMessage> = emptyList(),
 )
 
 class ChatViewModel(app: Application, private val container: AppContainer) : AndroidViewModel(app) {
@@ -204,17 +204,17 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
     fun cancelAgent() {
         agentJob?.cancel()
         agentJob = null
-        _state.update { it.copy(running = false, approval = null, pendingQuestion = null, queuedMessage = null) }
+        _state.update { it.copy(running = false, approval = null, pendingQuestion = null, queuedMessages = emptyList()) }
     }
 
     /** Queue a message to send after the current agent run completes. */
     fun queueMessage(text: String, image: Pair<String, String>? = null) {
-        _state.update { it.copy(queuedMessage = QueuedMessage(text, image)) }
+        _state.update { it.copy(queuedMessages = it.queuedMessages + QueuedMessage(text, image)) }
     }
 
-    /** Discard any queued message. */
-    fun cancelQueue() {
-        _state.update { it.copy(queuedMessage = null) }
+    /** Discard a queued message by index. */
+    fun cancelQueue(index: Int) {
+        _state.update { it.copy(queuedMessages = it.queuedMessages.toMutableList().apply { removeAt(index) }) }
     }
 
     /** Re-run the agent against the current conversation (after all auto-retries exhausted). */
@@ -270,8 +270,8 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
 
             // Process any queued message after agent completes
             while (true) {
-                val queued = _state.value.queuedMessage ?: break
-                _state.update { it.copy(queuedMessage = null) }
+                val queued = _state.value.queuedMessages.firstOrNull() ?: break
+                _state.update { it.copy(queuedMessages = it.queuedMessages.drop(1)) }
                 val queuedBlocks = buildList {
                     if (queued.image != null) add(Block.Image(queued.image.first, queued.image.second))
                     if (queued.text.isNotBlank()) add(Block.Text(queued.text))
