@@ -100,6 +100,7 @@ data class ChatUiState(
     val retryingAttempt: Int? = null,
     val retryingCause: String? = null,
     val canRetry: Boolean = false,
+    val scrollVersion: Int = 0,
 )
 
 class ChatViewModel(app: Application, private val container: AppContainer) : AndroidViewModel(app) {
@@ -403,7 +404,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
             uiMsgs = uiMsgs + UiMessage(rowId, msg.role, msg.blocks)
         }
         persistedCount = conversation.size
-        _state.update { it.copy(messages = uiMsgs, streamingText = "", pendingToolCalls = emptyMap()) }
+        _state.update { it.copy(messages = uiMsgs, streamingText = "", pendingToolCalls = emptyMap(), scrollVersion = it.scrollVersion + 1) }
     }
 
     private fun uiToRow(msg: ConvMessage, threadId: Long): MessageEntity = MessageEntity(

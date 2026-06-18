@@ -185,11 +185,12 @@ fun ChatScreen(
     val isImeVisible = WindowInsets.isImeVisible
     val streamLen = state.streamingText.length
 
-    // Scroll to bottom on new items, keyboard opens, or while text streams in.
-    LaunchedEffect(totalItems, isImeVisible) {
+    // Scroll to bottom on new items, keyboard opens, new persisted messages, or while streaming.
+    // Use a large scrollOffset to ensure we land at the bottom of the last item, not its top.
+    LaunchedEffect(totalItems, isImeVisible, state.scrollVersion) {
         if (totalItems > 0) {
             if (isImeVisible) kotlinx.coroutines.delay(250) // wait for keyboard animation
-            listState.animateScrollToItem(totalItems - 1)
+            listState.animateScrollToItem(totalItems - 1, scrollOffset = Int.MAX_VALUE / 2)
         }
     }
     // Snap to the bottom as streaming text grows. Use scrollToItem (not animated)
