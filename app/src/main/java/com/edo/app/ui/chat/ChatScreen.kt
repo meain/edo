@@ -816,46 +816,7 @@ private fun CompletedToolCard(
                 )
             }
             AnimatedVisibility(visible = expanded) {
-                Column(Modifier.padding(top = 8.dp)) {
-                    if (argsJson.isNotBlank() && argsJson != "{}") {
-                        Text("Arguments", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            argsJson,
-                            fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
-                        )
-                    }
-                    if (result != null) {
-                        val resultLabel = if (isError) "Error" else "Result"
-                        val resultColor = if (isError) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                        Text(
-                            resultLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = resultColor,
-                        )
-                        // Errors are shown in full so the model's hint text isn't truncated;
-                        // successful results stay capped to keep large file dumps readable.
-                        val cap = if (isError) 8000 else 1200
-                        val preview = if (result.length > cap) result.take(cap) + "\n…[truncated, " + (result.length - cap) + " more chars]" else result
-                        Surface(
-                            color = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
-                            else MaterialTheme.colorScheme.surfaceContainerHighest,
-                            shape = MaterialTheme.shapes.small,
-                            modifier = Modifier.padding(top = 4.dp),
-                        ) {
-                            Text(
-                                preview,
-                                fontFamily = FontFamily.Monospace,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isError) MaterialTheme.colorScheme.onErrorContainer
-                                else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(8.dp).fillMaxWidth(),
-                            )
-                        }
-                    }
-                }
+                ToolExpandedContent(name = name, argsJson = argsJson, result = result, isError = isError)
             }
         }
     }
@@ -1115,6 +1076,7 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
         }
         "load_skill" -> s("name") ?: ""
         "current_datetime" -> ""
+        "calculator" -> s("expression") ?: ""
         else -> ""
     }
     val label = when (name) {
@@ -1128,6 +1090,7 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
         "http_request" -> "HTTP"
         "load_skill" -> "Skill"
         "current_datetime" -> "Time"
+        "calculator" -> "Calc"
         else -> name
     }
     return label to detail
@@ -1159,5 +1122,178 @@ internal fun iconForTool(name: String, isError: Boolean): androidx.compose.ui.gr
     name == "http_request" -> Icons.Filled.Language
     name == "load_skill" -> Icons.Filled.AutoAwesome
     name == "current_datetime" -> Icons.Filled.Schedule
+    name == "calculator" -> Icons.Filled.Add
     else -> Icons.Filled.CheckCircle
+}
+
+@Composable
+private fun ToolExpandedContent(name: String, argsJson: String, result: String?, isError: Boolean) {
+    fun strArg(key: String): String? {
+        val args = runCatching {
+            kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+                .parseToJsonElement(argsJson) as kotlinx.serialization.json.JsonObject
+        }.getOrNull() ?: return null
+        return (args[key] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    }
+
+    Column(Modifier.padding(top = 8.dp)) {
+        when (name) {
+            "edit_file" -> {
+                val oldStr = strArg("old_string")
+                val newStr = strArg("new_string")
+                if (oldStr != null && newStr != null) {
+                    Text("Changes", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(4.dp))
+                    DiffView(
+                        oldStr = if (oldStr.lines().size > 30) oldStr.lines().take(30).joinToString("\n") + "\n…" else oldStr,
+                        newStr = if (newStr.lines().size > 30) newStr.lines().take(30).joinToString("\n") + "\n…" else newStr,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                } else {
+                    ArgsBlock(argsJson)
+                }
+                if (result != null) ResultBlock(result, isError)
+            }
+            "write_file" -> {
+                val content = strArg("content")
+                if (content != null) {
+                    Text("Content", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(4.dp))
+                    CodeBlock(content)
+                } else {
+                    ArgsBlock(argsJson)
+                }
+                if (result != null) {
+                    Text(
+                        result,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+            "read_file" -> {
+                // Path is shown in header; result is the file content
+                if (result != null) ResultBlock(result, isError)
+            }
+            else -> {
+                if (argsJson.isNotBlank() && argsJson != "{}") ArgsBlock(argsJson)
+                if (result != null) ResultBlock(result, isError)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiffView(oldStr: String, newStr: String) {
+    Column(Modifier.fillMaxWidth()) {
+        oldStr.lines().forEach { line ->
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "- $line",
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp),
+                )
+            }
+        }
+        newStr.lines().forEach { line ->
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "+ $line",
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArgsBlock(argsJson: String) {
+    val args = runCatching {
+        kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+            .parseToJsonElement(argsJson) as kotlinx.serialization.json.JsonObject
+    }.getOrNull()
+    Text("Arguments", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp).fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(8.dp)) {
+            if (args != null) {
+                for ((k, v) in args) {
+                    val str = (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: v.toString()
+                    val display = if (str.length > 120) str.take(120) + "…" else str
+                    Row {
+                        Text(
+                            "$k: ",
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            display,
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else {
+                Text(argsJson, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CodeBlock(content: String) {
+    val display = if (content.length > 2000) content.take(2000) + "\n…[truncated]" else content
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(bottom = 6.dp).fillMaxWidth(),
+    ) {
+        Text(
+            display,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(8.dp),
+        )
+    }
+}
+
+@Composable
+private fun ResultBlock(result: String, isError: Boolean) {
+    val cap = if (isError) 8000 else 1200
+    val preview = if (result.length > cap) result.take(cap) + "\n…[truncated, ${result.length - cap} more chars]" else result
+    Text(
+        if (isError) "Error" else "Result",
+        style = MaterialTheme.typography.labelSmall,
+        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Surface(
+        color = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+    ) {
+        Text(
+            preview,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(8.dp).fillMaxWidth(),
+        )
+    }
 }

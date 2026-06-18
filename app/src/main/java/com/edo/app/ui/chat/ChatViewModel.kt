@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.edo.app.AppContainer
 import com.edo.app.agent.Agent
 import com.edo.app.agent.ApprovalDecision
+import com.edo.app.agent.CalculatorTool
 import com.edo.app.agent.ApprovalGate
 import com.edo.app.agent.AskUserQuestionTool
 import com.edo.app.agent.CopyFileTool
@@ -301,6 +302,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 GrepTool(ws),
                 HttpRequestTool(KtorHttpFetcher(container.http)),
                 DateTimeTool(),
+                CalculatorTool(),
                 LoadSkillTool(ws),
                 AskUserQuestionTool(askUser),
             )
