@@ -39,7 +39,7 @@ sealed interface AgentEvent {
     data class ToolCallResult(val id: String, val result: ToolResult) : AgentEvent
     data class TurnDone(val stopReason: String?) : AgentEvent
     data class Failure(val message: String) : AgentEvent
-    data class Retrying(val attempt: Int, val maxAttempts: Int) : AgentEvent
+    data class Retrying(val attempt: Int, val maxAttempts: Int, val cause: String? = null, val delayMs: Long = 2000L) : AgentEvent
     data object StreamingReset : AgentEvent
     data object Finished : AgentEvent
 }
@@ -68,9 +68,10 @@ class Agent(
 
             for (attempt in 0..MAX_LLM_RETRIES) {
                 if (attempt > 0) {
+                    val delayMs = minOf(1000L shl attempt, 15_000L) // 2s, 4s, 8s, 15s cap
                     emit(AgentEvent.StreamingReset)
-                    emit(AgentEvent.Retrying(attempt, MAX_LLM_RETRIES))
-                    delay(2000L)
+                    emit(AgentEvent.Retrying(attempt, MAX_LLM_RETRIES, lastError, delayMs))
+                    delay(delayMs)
                     assistantBlocks = mutableListOf()
                     pendingToolUses = linkedMapOf()
                     assistantText = StringBuilder()

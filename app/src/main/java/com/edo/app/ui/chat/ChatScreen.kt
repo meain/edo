@@ -329,7 +329,11 @@ fun ChatScreen(
                         }
                         state.retryingAttempt?.let { attempt ->
                             item("retrying") {
-                                RetryingBanner(attempt = attempt, maxAttempts = com.edo.app.agent.Agent.MAX_LLM_RETRIES)
+                                RetryingBanner(
+                                    attempt = attempt,
+                                    maxAttempts = com.edo.app.agent.Agent.MAX_LLM_RETRIES,
+                                    cause = state.retryingCause,
+                                )
                             }
                         }
                         state.error?.let { err ->
@@ -857,70 +861,113 @@ private fun CompletedToolCard(
 }
 
 @Composable
-private fun RetryingBanner(attempt: Int, maxAttempts: Int) {
+private fun RetryingBanner(attempt: Int, maxAttempts: Int, cause: String? = null) {
     val transition = rememberInfiniteTransition(label = "retry-pulse")
     val alpha by transition.animateFloat(
         initialValue = 0.5f, targetValue = 1f, label = "pulse",
         animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
     )
+    var showCause by remember { mutableStateOf(false) }
     Surface(
         color = MaterialTheme.colorScheme.secondaryContainer,
         shape = MaterialTheme.shapes.small,
+        modifier = Modifier.animateContentSize(),
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Filled.Schedule,
-                null,
-                modifier = Modifier.size(14.dp).alpha(alpha),
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "Retrying… ($attempt / $maxAttempts)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Schedule,
+                    null,
+                    modifier = Modifier.size(14.dp).alpha(alpha),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Retrying… ($attempt / $maxAttempts)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.weight(1f),
+                )
+                if (cause != null) {
+                    IconButton(
+                        onClick = { showCause = !showCause },
+                        modifier = Modifier.size(20.dp),
+                    ) {
+                        Icon(
+                            if (showCause) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            contentDescription = "Show error",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+            }
+            AnimatedVisibility(visible = showCause && cause != null) {
+                Text(
+                    cause ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 6.dp).fillMaxWidth(),
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun ErrorBanner(message: String, onDismiss: () -> Unit, onRetry: (() -> Unit)? = null) {
+    var expanded by remember { mutableStateOf(false) }
+    val isLong = message.length > 120
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         shape = MaterialTheme.shapes.small,
+        modifier = Modifier.animateContentSize(),
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Filled.Error,
-                null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.error,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                message,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            if (onRetry != null) {
-                TextButton(onClick = onRetry, modifier = Modifier.height(28.dp)) {
-                    Text("Retry", style = MaterialTheme.typography.labelSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Error,
+                    null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (!expanded && isLong) message.take(120) + "…" else message,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                if (isLong) {
+                    IconButton(
+                        onClick = { expanded = !expanded },
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Icon(
+                            if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            contentDescription = "Show full error",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
                 }
-            }
-            TextButton(onClick = onDismiss, modifier = Modifier.height(28.dp)) {
-                Text("×", style = MaterialTheme.typography.bodyMedium)
+                if (onRetry != null) {
+                    TextButton(onClick = onRetry, modifier = Modifier.height(28.dp)) {
+                        Text("Retry", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.height(28.dp)) {
+                    Text("×", style = MaterialTheme.typography.bodyMedium)
+                }
             }
         }
     }

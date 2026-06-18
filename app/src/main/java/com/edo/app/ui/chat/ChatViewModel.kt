@@ -98,6 +98,7 @@ data class ChatUiState(
     val error: String? = null,
     val needsProject: Boolean = false,
     val retryingAttempt: Int? = null,
+    val retryingCause: String? = null,
     val canRetry: Boolean = false,
 )
 
@@ -336,6 +337,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 s.copy(
                     running = false,
                     retryingAttempt = null,
+                    retryingCause = null,
                     canRetry = s.error != null && s.currentThread != null,
                 )
             }
@@ -387,7 +389,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 _state.update { it.copy(streamingText = "", pendingToolCalls = emptyMap()) }
 
             is AgentEvent.Retrying ->
-                _state.update { it.copy(streamingText = "", pendingToolCalls = emptyMap(), retryingAttempt = ev.attempt) }
+                _state.update { it.copy(streamingText = "", pendingToolCalls = emptyMap(), retryingAttempt = ev.attempt, retryingCause = ev.cause) }
 
             AgentEvent.Finished -> Unit
         }
