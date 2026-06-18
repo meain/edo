@@ -50,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -296,6 +297,7 @@ private fun FileView(path: String, content: String) {
     val isMarkdown = path.endsWith(".md", ignoreCase = true) ||
         path.endsWith(".markdown", ignoreCase = true)
     val isCsv = path.endsWith(".csv", ignoreCase = true)
+    val isHtml = path.endsWith(".html", ignoreCase = true) || path.endsWith(".htm", ignoreCase = true)
     Column(Modifier.fillMaxSize()) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
@@ -320,6 +322,16 @@ private fun FileView(path: String, content: String) {
             }
         } else if (isCsv) {
             CsvView(content = content)
+        } else if (isHtml) {
+            AndroidView(
+                factory = { ctx ->
+                    android.webkit.WebView(ctx).apply {
+                        settings.javaScriptEnabled = false
+                        loadDataWithBaseURL(null, content, "text/html", "UTF-8", null)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
         } else {
             val hScroll = rememberScrollState()
             val vScroll = rememberScrollState()
