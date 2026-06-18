@@ -228,7 +228,7 @@ class GrepTool(private val ws: Workspace) : Tool {
 class DateTimeTool(private val clock: () -> Long = System::currentTimeMillis) : Tool {
     override val spec = ToolSpec(
         name = "current_datetime",
-        description = "Get the current date and time. Returns ISO 8601 formatted local time plus a UTC timestamp, the device timezone, and milliseconds since epoch.",
+        description = "Get the current date and time. Returns ISO 8601 local time, UTC, timezone, epoch ms, day of week, week number, day of year, and quarter.",
         parametersJson = """{"type":"object","properties":{}}""",
     )
 
@@ -237,11 +237,16 @@ class DateTimeTool(private val clock: () -> Long = System::currentTimeMillis) : 
         val zone = java.time.ZoneId.systemDefault()
         val instant = java.time.Instant.ofEpochMilli(nowMs)
         val local = instant.atZone(zone)
+        val weekFields = java.time.temporal.WeekFields.ISO
         val out = buildString {
-            append("local: ").append(local.format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)).append('\n')
-            append("utc:   ").append(instant.toString()).append('\n')
-            append("zone:  ").append(zone.id).append('\n')
-            append("epoch: ").append(nowMs)
+            append("local:       ").append(local.format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)).append('\n')
+            append("utc:         ").append(instant.toString()).append('\n')
+            append("zone:        ").append(zone.id).append('\n')
+            append("epoch:       ").append(nowMs).append('\n')
+            append("day_of_week: ").append(local.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())).append('\n')
+            append("week_number: ").append(local.get(weekFields.weekOfWeekBasedYear())).append('\n')
+            append("day_of_year: ").append(local.dayOfYear).append('\n')
+            append("quarter:     Q").append((local.monthValue - 1) / 3 + 1)
         }
         return ToolResult(out)
     }
