@@ -448,9 +448,28 @@ private fun EditProjectSheet(
     onDeleteRequest: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
     var name by remember(project.id) { mutableStateOf(project.name) }
     var description by remember(project.id) { mutableStateOf(project.description) }
     var yoloMode by remember(project.id) { mutableStateOf(project.yoloMode) }
+    var workspaceUri by remember(project.id) { mutableStateOf(project.workspaceUri) }
+
+    val pickFolder = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+            workspaceUri = uri.toString()
+        }
+    }
+
+    val edoFolderUri = DocumentsContract.buildDocumentUri(
+        "com.android.externalstorage.documents", "primary:Edo"
+    )
 
     Column(
         modifier = Modifier
@@ -461,12 +480,6 @@ private fun EditProjectSheet(
             .animateContentSize(),
     ) {
         Text("Project settings", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            humanWorkspacePath(project.workspaceUri),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         Spacer(Modifier.height(20.dp))
         OutlinedTextField(
             value = name,
@@ -483,6 +496,27 @@ private fun EditProjectSheet(
             modifier = Modifier.fillMaxWidth(),
             maxLines = 4,
         )
+        Spacer(Modifier.height(12.dp))
+        val folderLabel = humanWorkspacePath(workspaceUri).ifBlank { "Folder selected" }
+        Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            shape = MaterialTheme.shapes.small,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { keyboard?.hide(); pickFolder.launch(edoFolderUri) }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Folder, null, tint = MaterialTheme.colorScheme.secondary)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Workspace folder", style = MaterialTheme.typography.labelSmall)
+                    Text(folderLabel, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
         Spacer(Modifier.height(16.dp))
         YoloRow(yoloMode = yoloMode, onChange = { yoloMode = it })
         Spacer(Modifier.height(20.dp))
@@ -497,6 +531,7 @@ private fun EditProjectSheet(
                                 name = name.trim().ifBlank { project.name },
                                 description = description.trim(),
                                 yoloMode = yoloMode,
+                                workspaceUri = workspaceUri,
                             )
                         )
                         onDone()
