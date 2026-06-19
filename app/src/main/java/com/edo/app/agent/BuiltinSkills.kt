@@ -19,13 +19,13 @@ description: Create a new skill in this project. Use when asked to create, add, 
 
 # Create a Skill
 
-Skills follow the Agent Skills format (agentskills.io). Each skill is a folder under `.edo/skills/`
+Skills follow the Agent Skills format (agentskills.io). Each skill is a folder under `.agents/skills/`
 containing a `SKILL.md` file.
 
 ## Folder structure
 
 ```
-.edo/skills/<name>/
+.agents/skills/<name>/
 ├── SKILL.md       ← required
 ├── scripts/       ← optional: shell/Python helpers the instructions reference
 ├── references/    ← optional: extra documentation
@@ -57,6 +57,6 @@ Step-by-step instructions for the agent...
 
 1. Pick a name (e.g. `deploy`, `run-tests`, `format-code`)
 2. Draft the SKILL.md with frontmatter + step-by-step instructions
-3. Use `write_file` to save `.edo/skills/<name>/SKILL.md`
+3. Use `write_file` to save `.agents/skills/<name>/SKILL.md`
 4. Optionally create `scripts/` or `references/` alongside it
 """.trimIndent()

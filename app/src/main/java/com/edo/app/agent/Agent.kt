@@ -192,7 +192,7 @@ class Agent(
 /**
  * Assemble the system prompt by combining the default prompt with optional
  * project-specific context: an `AGENTS.md` (or `CLAUDE.md` symlink target)
- * at the workspace root, and a summary of any skills under `.edo/skills/`.
+ * at the workspace root, and a summary of any skills under `.agents/skills/`.
  */
 fun buildSystemPrompt(ws: Workspace): String {
     val out = StringBuilder(Agent.DefaultSystemPrompt)
@@ -211,7 +211,7 @@ fun buildSystemPrompt(ws: Workspace): String {
     if (skills.isNotEmpty()) {
         out.append("\n## Project skills\n\n")
         for (s in skills) {
-            out.append("- **${s.name}** — ${s.description}\n")
+            out.append("- **${s.name}** (`${s.path}`) — ${s.description}\n")
         }
     }
     return out.toString()
@@ -219,11 +219,11 @@ fun buildSystemPrompt(ws: Workspace): String {
 
 data class SkillInfo(val name: String, val description: String, val path: String)
 
-/** Discover skills under .edo/skills/ (or .agents/skills/).
+/** Discover skills under .agents/skills/.
  *  Supports folder-based skills (agentskills.io format: <name>/SKILL.md)
  *  and legacy flat .md files side-by-side. */
 fun discoverSkills(ws: Workspace): List<SkillInfo> {
-    val roots = listOf(".edo/skills", ".agents/skills")
+    val roots = listOf(".agents/skills")
     val seen = mutableSetOf<String>()
     val out = mutableListOf<SkillInfo>()
     for (root in roots) {

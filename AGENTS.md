@@ -34,7 +34,7 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 | `current_datetime` | Current date/time with zone, epoch, week info |
 | `ask_user` | Ask the user a question with predefined options or freetext |
 | `calculator` | Evaluate math expressions (supports +, -, *, /, ^, sqrt, sin, cos, tan, log, ln, exp, etc.) |
-| `load_skill` | Load a skill Markdown file from `.edo/skills/` or `.agents/skills/` |
+| `load_skill` | Load a skill Markdown file from `.agents/skills/` |
 
 ## Agent loop
 
@@ -45,10 +45,10 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 
 ## Skills
 
-Skills are Markdown files discovered at startup from `.edo/skills/` or `.agents/skills/` in the workspace root. Supported formats:
+Skills are Markdown files discovered at startup from `.agents/skills/` in the workspace root. Supported formats:
 
-- Flat file: `.edo/skills/<name>.md`
-- agentskills.io folder format: `.edo/skills/<name>/SKILL.md`
+- Flat file: `.agents/skills/<name>.md`
+- agentskills.io folder format: `.agents/skills/<name>/SKILL.md`
 
 The agent loads a skill's content on demand via `load_skill`. A built-in `create-skill` skill helps scaffold new ones.
 
