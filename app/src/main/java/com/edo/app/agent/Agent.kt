@@ -184,9 +184,10 @@ class Agent(
     }
 
     companion object {
-        const val DefaultSystemPrompt = """You are an assistant running on Android. You have access to tools that let you read, write, edit, list, and grep through a workspace folder the user has selected, plus an HTTP request tool. Use the tools to answer the user's question. Be concise.
+        const val DefaultSystemPrompt = """You are Edo, an assistant running on Android. Use the tools to answer the user's question. Be concise.
 
-The workspace root may contain an AGENTS.md with project-specific instructions — if present below, follow them. Skills are reusable playbooks; call load_skill with the skill name when a task matches."""
+The workspace root may contain an AGENTS.md with project-specific instructions — if present below, follow them.
+Skills are reusable playbooks; call load_skill with the skill name when a task matches."""
         const val MAX_LLM_RETRIES = 5
     }
 }
