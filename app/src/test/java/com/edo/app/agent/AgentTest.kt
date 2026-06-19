@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -166,25 +167,20 @@ class AgentTest {
     }
 
     @Test
-    fun buildSystemPromptFallsBackToClaudeMd() {
-        val ws = InMemoryWorkspace(mapOf("CLAUDE.md" to "use_jj"))
-        val prompt = buildSystemPrompt(ws)
-        assertTrue(prompt.contains("use_jj"))
-    }
-
-    @Test
     fun buildSystemPromptOmitsSectionWhenMissing() {
         val ws = InMemoryWorkspace()
         val prompt = buildSystemPrompt(ws)
-        assertEquals(Agent.DefaultSystemPrompt, prompt)
+        assertTrue(prompt.contains(Agent.DefaultSystemPrompt))
+        assertFalse(prompt.contains("Project instructions"))
+        assertFalse(prompt.contains("Project skills"))
     }
 
     @Test
     fun discoverSkillsFindsMarkdownFiles() {
         val ws = InMemoryWorkspace(
             mapOf(
-                ".edo/skills/refactor.md" to "---\ndescription: Refactor tools\n---\n# Refactor\nbody",
-                ".edo/skills/explain.md" to "# Explain\nDescribes things in plain language.",
+                ".agents/skills/refactor.md" to "---\ndescription: Refactor tools\n---\n# Refactor\nbody",
+                ".agents/skills/explain.md" to "# Explain\nDescribes things in plain language.",
             )
         )
         val skills = discoverSkills(ws)
@@ -198,7 +194,7 @@ class AgentTest {
     @Test
     fun loadSkillToolReturnsFullContent() = runTest {
         val ws = InMemoryWorkspace(
-            mapOf(".edo/skills/foo.md" to "# Foo\nrun foo")
+            mapOf(".agents/skills/foo.md" to "# Foo\nrun foo")
         )
         val r = LoadSkillTool(ws).invoke("""{"name":"foo"}""")
         assertTrue(!r.isError)
@@ -215,19 +211,18 @@ class AgentTest {
     @Test
     fun buildSystemPromptListsSkills() {
         val ws = InMemoryWorkspace(
-            mapOf(".edo/skills/foo.md" to "---\ndescription: Foo runner\n---\nbody")
+            mapOf(".agents/skills/foo.md" to "---\ndescription: Foo runner\n---\nbody")
         )
         val prompt = buildSystemPrompt(ws)
-        assertTrue(prompt.contains("Available skills"))
+        assertTrue(prompt.contains("Project skills"))
         assertTrue(prompt.contains("foo"))
         assertTrue(prompt.contains("Foo runner"))
     }
 
     @Test
     fun llmFailureFinishesAgentRun() = runTest {
-        val script = listOf(
-            listOf(LlmEvent.Failure("boom")),
-        )
+        // Enough failures to exhaust all retry attempts (0..MAX_LLM_RETRIES)
+        val script = List(Agent.MAX_LLM_RETRIES + 1) { listOf(LlmEvent.Failure("boom")) }
         val agent = Agent(
             llm = ScriptedLlm(script),
             tools = ToolRegistry(listOf(echoTool())),
