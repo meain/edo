@@ -21,6 +21,7 @@ import com.edo.app.agent.KtorHttpFetcher
 import com.edo.app.agent.LoadSkillTool
 import com.edo.app.agent.LsTool
 import com.edo.app.agent.ReadFileTool
+import com.edo.app.agent.RunLuaTool
 import com.edo.app.agent.FileWorkspace
 import com.edo.app.agent.SafWorkspace
 import com.edo.app.agent.ToolRegistry
@@ -339,6 +340,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 CalculatorTool(),
                 LoadSkillTool(ws),
                 AskUserQuestionTool(askUser),
+                RunLuaTool(),
             )
         )
         val llm: LlmClient = when (settings.provider) {

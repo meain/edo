@@ -84,6 +84,7 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.client.logging)
 
+    implementation(libs.luaj.jse)
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.documentfile)
 

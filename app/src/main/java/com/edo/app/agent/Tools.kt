@@ -3,6 +3,12 @@ package com.edo.app.agent
 import com.edo.app.llm.ToolSpec
 import kotlin.math.*
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.luaj.vm2.LuaValue
+import org.luaj.vm2.Varargs
+import org.luaj.vm2.lib.VarArgFunction
+import org.luaj.vm2.lib.jse.JsePlatform
 import io.ktor.client.request.headers
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -346,6 +352,61 @@ class CalculatorTool : Tool {
             ToolResult("$expression = $formatted")
         } catch (e: Exception) {
             ToolResult("error: ${e.message}", isError = true)
+        }
+    }
+}
+
+class RunLuaTool : Tool {
+    override val spec = ToolSpec(
+        name = "run_lua",
+        description = "Execute a Lua 5.2 program and return its output. Use print() to produce output. math, string, and table libraries are available; file/os/network access is not. Execution times out after 10 seconds.",
+        parametersJson = """{"type":"object","properties":{"code":{"type":"string","description":"Lua source code to execute"}},"required":["code"]}""",
+    )
+
+    override suspend fun invoke(argsJson: String): ToolResult {
+        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
+        val code = args.str("code") ?: return ToolResult("missing 'code'", isError = true)
+
+        return withContext(Dispatchers.IO) {
+            val output = StringBuilder()
+            var result: ToolResult? = null
+
+            val thread = Thread {
+                try {
+                    val globals = JsePlatform.standardGlobals()
+                    globals.set("io", LuaValue.NIL)
+                    globals.set("os", LuaValue.NIL)
+                    globals.set("package", LuaValue.NIL)
+                    globals.set("require", LuaValue.NIL)
+                    globals.set("dofile", LuaValue.NIL)
+                    globals.set("loadfile", LuaValue.NIL)
+                    globals.set("print", object : VarArgFunction() {
+                        override fun invoke(args: Varargs): Varargs {
+                            for (i in 1..args.narg()) {
+                                if (i > 1) output.append('\t')
+                                output.append(args.arg(i).tojstring())
+                            }
+                            output.append('\n')
+                            return LuaValue.NONE
+                        }
+                    })
+                    globals.load(code, "agent").call()
+                    val out = output.toString().trimEnd()
+                    result = ToolResult(if (out.isEmpty()) "(no output)" else out)
+                } catch (e: Throwable) {
+                    result = ToolResult("lua error: ${e.message}", isError = true)
+                }
+            }
+            thread.isDaemon = true
+            thread.start()
+            thread.join(10_000L)
+            if (thread.isAlive) {
+                @Suppress("DEPRECATION")
+                thread.stop()
+                ToolResult("lua error: execution timed out after 10 seconds", isError = true)
+            } else {
+                result ?: ToolResult("lua error: unknown error", isError = true)
+            }
         }
     }
 }
