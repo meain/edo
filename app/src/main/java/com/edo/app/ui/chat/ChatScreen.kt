@@ -1,6 +1,7 @@
 package com.edo.app.ui.chat
 
 import android.content.ContentResolver
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -48,7 +49,12 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.foundation.Image as ComposeImage
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -679,32 +685,54 @@ private fun MessageBubble(
             val textBlocks = msg.blocks.filterIsInstance<Block.Text>()
             val imageBlocks = msg.blocks.filterIsInstance<Block.Image>()
             if (textBlocks.isEmpty() && imageBlocks.isEmpty()) return
-            val text = buildString {
-                if (imageBlocks.isNotEmpty()) append("[image] ")
-                append(textBlocks.joinToString("\n") { it.text })
-            }.trim()
+            val text = textBlocks.joinToString("\n") { it.text }.trim()
             Row(Modifier.fillMaxWidth()) {
                 Spacer(Modifier.weight(1f))
-                Surface(
-                    color = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-                    tonalElevation = 1.dp,
-                    modifier = Modifier.combinedClickable(
-                        onClick = {},
-                        onLongClick = {
-                            clipboard.setText(AnnotatedString(text))
-                            android.widget.Toast
-                                .makeText(context, "Copied message", android.widget.Toast.LENGTH_SHORT)
-                                .show()
-                        },
-                    ),
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(
-                        text = text,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+                    for (imgBlock in imageBlocks) {
+                        val bytes = remember(imgBlock.base64) {
+                            Base64.decode(imgBlock.base64, Base64.DEFAULT)
+                        }
+                        val bitmap = remember(bytes) {
+                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        }
+                        if (bitmap != null) {
+                            ComposeImage(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .widthIn(max = 240.dp)
+                                    .clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.FillWidth,
+                            )
+                        }
+                    }
+                    if (text.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
+                            tonalElevation = 1.dp,
+                            modifier = Modifier.combinedClickable(
+                                onClick = {},
+                                onLongClick = {
+                                    clipboard.setText(AnnotatedString(text))
+                                    android.widget.Toast
+                                        .makeText(context, "Copied message", android.widget.Toast.LENGTH_SHORT)
+                                        .show()
+                                },
+                            ),
+                        ) {
+                            Text(
+                                text = text,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
                 }
             }
         }
