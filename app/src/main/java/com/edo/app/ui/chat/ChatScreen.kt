@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -133,28 +132,25 @@ fun ChatScreen(
     )
     val state by vm.state.collectAsState()
     var input by remember { mutableStateOf("") }
-    var pendingImage by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingImages by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var pendingTextFile by remember { mutableStateOf<Pair<String, String>?>(null) }
     val expandedToolIds = remember { mutableStateMapOf<String, Boolean>() }
     var viewingImage by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
 
-    val pickFile = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            val attachment = readAttachment(context.contentResolver, uri)
-            when (attachment) {
-                is Attachment.Image -> {
-                    pendingImage = attachment.mediaType to attachment.base64
-                }
-                is Attachment.Text -> {
-                    pendingTextFile = attachment.name to attachment.content
-                }
-                null -> android.widget.Toast
-                    .makeText(context, "Unsupported file type", android.widget.Toast.LENGTH_SHORT)
-                    .show()
+    val pickFiles = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        var anyUnsupported = false
+        for (uri in uris) {
+            when (val attachment = readAttachment(context.contentResolver, uri)) {
+                is Attachment.Image -> pendingImages = pendingImages + (attachment.mediaType to attachment.base64)
+                is Attachment.Text -> pendingTextFile = attachment.name to attachment.content
+                null -> anyUnsupported = true
             }
         }
+        if (anyUnsupported) android.widget.Toast
+            .makeText(context, "Some files were unsupported", android.widget.Toast.LENGTH_SHORT)
+            .show()
     }
 
     // Camera capture: write to a cacheDir file via FileProvider, then read it
@@ -165,7 +161,8 @@ fun ChatScreen(
     ) { success ->
         val uri = pendingCaptureUri
         if (success && uri != null) {
-            pendingImage = readImageAsBase64(context.contentResolver, uri)
+            val img = readImageAsBase64(context.contentResolver, uri)
+            if (img != null) pendingImages = pendingImages + img
         }
         pendingCaptureUri = null
     }
@@ -398,11 +395,11 @@ fun ChatScreen(
                             }
                         }
                     }
-                    if (pendingImage != null) {
+                    if (pendingImages.isNotEmpty()) {
                         AttachmentChip(
                             icon = Icons.Filled.Image,
-                            label = "Image attached",
-                            onRemove = { pendingImage = null },
+                            label = if (pendingImages.size == 1) "1 image" else "${pendingImages.size} images",
+                            onRemove = { pendingImages = emptyList() },
                         )
                     }
                     pendingTextFile?.let { (filename, content) ->
@@ -414,12 +411,12 @@ fun ChatScreen(
                     }
                     Row(verticalAlignment = Alignment.Bottom) {
                         IconButton(
-                            onClick = { pickFile.launch(arrayOf("*/*")) },
+                            onClick = { pickFiles.launch(arrayOf("*/*")) },
                             modifier = Modifier.padding(bottom = 2.dp),
                         ) {
                             Icon(
                                 Icons.Filled.AttachFile,
-                                contentDescription = "Attach file",
+                                contentDescription = "Attach files",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -455,7 +452,7 @@ fun ChatScreen(
                                 disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                             ),
                         )
-                        val hasContent = input.isNotBlank() || pendingImage != null || pendingTextFile != null
+                        val hasContent = input.isNotBlank() || pendingImages.isNotEmpty() || pendingTextFile != null
                         val composed = buildString {
                             pendingTextFile?.let { (filename, content) ->
                                 append("Attached file `").append(filename).append("`:\n")
@@ -467,9 +464,9 @@ fun ChatScreen(
                             // Queue button: agent is running but user has typed a message
                             IconButton(
                                 onClick = {
-                                    vm.queueMessage(composed.trim(), pendingImage)
+                                    vm.queueMessage(composed.trim(), pendingImages)
                                     input = ""
-                                    pendingImage = null
+                                    pendingImages = emptyList()
                                     pendingTextFile = null
                                 },
                                 modifier = Modifier.padding(bottom = 2.dp),
@@ -487,9 +484,9 @@ fun ChatScreen(
                                     if (state.running) {
                                         vm.cancelAgent()
                                     } else {
-                                        vm.sendUserMessage(composed.trim(), pendingImage)
+                                        vm.sendUserMessage(composed.trim(), pendingImages)
                                         input = ""
-                                        pendingImage = null
+                                        pendingImages = emptyList()
                                         pendingTextFile = null
                                     }
                                 },
