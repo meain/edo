@@ -48,8 +48,12 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.Image as ComposeImage
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.ui.draw.clip
@@ -101,6 +105,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -647,22 +653,117 @@ fun ChatScreen(
             onDismissRequest = { viewingImage = null },
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
-            Box(
+            ImageViewer(
+                bitmap = bmp,
+                onDismiss = { viewingImage = null },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImageViewer(bitmap: android.graphics.Bitmap, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    val transformState = rememberTransformableState { zoom, pan, _ ->
+        scale = (scale * zoom).coerceIn(0.5f, 8f)
+        offset += pan
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.95f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        ComposeImage(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y)
+                .transformable(state = transformState)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            if (scale > 1f) { scale = 1f; offset = androidx.compose.ui.geometry.Offset.Zero }
+                            else scale = 2.5f
+                        }
+                    )
+                },
+            contentScale = ContentScale.Fit,
+        )
+        // Close button
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp),
+        ) {
+            Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
+        }
+        // Action buttons
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 32.dp),
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            IconButton(
+                onClick = {
+                    val saved = saveBitmapToGallery(context, bitmap)
+                    android.widget.Toast.makeText(
+                        context,
+                        if (saved) "Saved to gallery" else "Failed to save",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                },
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.92f))
-                    .clickable { viewingImage = null },
-                contentAlignment = Alignment.Center,
+                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(50))
+                    .size(48.dp),
             ) {
-                ComposeImage(
-                    bitmap = bmp.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxWidth(),
-                    contentScale = ContentScale.Fit,
-                )
+                Icon(Icons.Filled.Save, contentDescription = "Download", tint = Color.White)
+            }
+            IconButton(
+                onClick = { shareBitmap(context, bitmap) },
+                modifier = Modifier
+                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(50))
+                    .size(48.dp),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Share", tint = Color.White)
             }
         }
     }
+}
+
+private fun saveBitmapToGallery(context: android.content.Context, bitmap: android.graphics.Bitmap): Boolean {
+    val values = android.content.ContentValues().apply {
+        put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "edo_${System.currentTimeMillis()}.jpg")
+        put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+        put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES)
+    }
+    val uri = context.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        ?: return false
+    return runCatching {
+        context.contentResolver.openOutputStream(uri)?.use {
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, it)
+        }
+        true
+    }.getOrDefault(false)
+}
+
+private fun shareBitmap(context: android.content.Context, bitmap: android.graphics.Bitmap) {
+    val file = java.io.File(context.cacheDir, "edo_share_${System.currentTimeMillis()}.jpg")
+    file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, it) }
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context, context.packageName + ".fileprovider", file
+    )
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "image/jpeg"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "Share image"))
 }
 
 @Composable
