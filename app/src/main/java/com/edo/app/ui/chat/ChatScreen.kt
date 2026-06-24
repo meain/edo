@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.foundation.Image as ComposeImage
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.ui.draw.clip
@@ -96,6 +97,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -133,6 +136,7 @@ fun ChatScreen(
     var pendingImage by remember { mutableStateOf<Pair<String, String>?>(null) }
     var pendingTextFile by remember { mutableStateOf<Pair<String, String>?>(null) }
     val expandedToolIds = remember { mutableStateMapOf<String, Boolean>() }
+    var viewingImage by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
 
     val pickFile = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -318,7 +322,7 @@ fun ChatScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(visibleMessages, key = { it.id }) { msg ->
-                            MessageBubble(msg, expandedToolIds, toolResults)
+                            MessageBubble(msg, expandedToolIds, toolResults) { viewingImage = it }
                         }
                         if (state.streamingText.isNotEmpty()) {
                             item("streaming") {
@@ -640,6 +644,28 @@ fun ChatScreen(
             }
         }
     }
+
+    viewingImage?.let { bmp ->
+        Dialog(
+            onDismissRequest = { viewingImage = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.92f))
+                    .clickable { viewingImage = null },
+                contentAlignment = Alignment.Center,
+            ) {
+                ComposeImage(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -677,6 +703,7 @@ private fun MessageBubble(
     msg: UiMessage,
     expandedIds: MutableMap<String, Boolean>,
     toolResults: Map<String, Block.ToolResult>,
+    onImageClick: (android.graphics.Bitmap) -> Unit = {},
 ) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -705,7 +732,8 @@ private fun MessageBubble(
                                 contentDescription = null,
                                 modifier = Modifier
                                     .widthIn(max = 240.dp)
-                                    .clip(RoundedCornerShape(12.dp)),
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { onImageClick(bitmap) },
                                 contentScale = ContentScale.FillWidth,
                             )
                         }
