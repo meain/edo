@@ -698,7 +698,8 @@ private fun ImageViewer(bitmap: android.graphics.Bitmap, onDismiss: () -> Unit) 
             onClick = onDismiss,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(8.dp),
+                .padding(8.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(50)),
         ) {
             Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
         }
@@ -719,7 +720,7 @@ private fun ImageViewer(bitmap: android.graphics.Bitmap, onDismiss: () -> Unit) 
                     ).show()
                 },
                 modifier = Modifier
-                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(50))
                     .size(48.dp),
             ) {
                 Icon(Icons.Filled.Save, contentDescription = "Download", tint = Color.White)
@@ -727,7 +728,7 @@ private fun ImageViewer(bitmap: android.graphics.Bitmap, onDismiss: () -> Unit) 
             IconButton(
                 onClick = { shareBitmap(context, bitmap) },
                 modifier = Modifier
-                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(50))
                     .size(48.dp),
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Share", tint = Color.White)
