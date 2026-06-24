@@ -740,7 +740,8 @@ private fun MessageBubble(
                             color = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary,
                             shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-                            tonalElevation = 1.dp,
+                            tonalElevation = 2.dp,
+                            shadowElevation = 2.dp,
                             modifier = Modifier.combinedClickable(
                                 onClick = {},
                                 onLongClick = {
@@ -811,6 +812,7 @@ private fun AssistantBubble(text: String, isStreaming: Boolean, expandedIds: Mut
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp),
+            shadowElevation = 2.dp,
             modifier = Modifier.combinedClickable(
                 onClick = {},
                 onLongClick = {
