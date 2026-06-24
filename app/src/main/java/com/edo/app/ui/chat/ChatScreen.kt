@@ -791,8 +791,8 @@ private fun MessageBubble(
                                 onToggle = { expandedIds[t.id] = !expanded },
                                 statusColor = when {
                                     res?.isError == true -> MaterialTheme.colorScheme.errorContainer
-                                    res != null -> MaterialTheme.colorScheme.tertiaryContainer
-                                    else -> MaterialTheme.colorScheme.surfaceVariant
+                                    res != null -> MaterialTheme.colorScheme.surfaceContainerHigh
+                                    else -> MaterialTheme.colorScheme.surfaceContainerLow
                                 },
                             )
                         }
@@ -843,7 +843,7 @@ private fun ToolCallCard(tc: PendingToolUi, expandedIds: MutableMap<String, Bool
     val expanded = expandedIds[tc.id] == true
     val statusColor = when {
         tc.isError -> MaterialTheme.colorScheme.errorContainer
-        tc.result != null -> MaterialTheme.colorScheme.tertiaryContainer
+        tc.result != null -> MaterialTheme.colorScheme.surfaceContainerHigh
         tc.approved == false -> MaterialTheme.colorScheme.errorContainer
         else -> MaterialTheme.colorScheme.secondaryContainer
     }
