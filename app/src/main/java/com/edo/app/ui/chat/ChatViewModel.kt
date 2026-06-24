@@ -75,7 +75,7 @@ data class PendingQuestion(
 
 data class QueuedMessage(
     val text: String,
-    val image: Pair<String, String>? = null,
+    val images: List<Pair<String, String>> = emptyList(),
 )
 
 data class UiMessage(
@@ -209,8 +209,8 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
     }
 
     /** Queue a message to send after the current agent run completes. */
-    fun queueMessage(text: String, image: Pair<String, String>? = null) {
-        _state.update { it.copy(queuedMessages = it.queuedMessages + QueuedMessage(text, image)) }
+    fun queueMessage(text: String, images: List<Pair<String, String>> = emptyList()) {
+        _state.update { it.copy(queuedMessages = it.queuedMessages + QueuedMessage(text, images)) }
     }
 
     /** Discard a queued message by index. */
@@ -226,13 +226,13 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         agentJob = container.appScope.launch { runAgent(threadId) }
     }
 
-    fun sendUserMessage(text: String, image: Pair<String, String>? = null) {
-        if (text.isBlank() && image == null) return
+    fun sendUserMessage(text: String, images: List<Pair<String, String>> = emptyList()) {
+        if (text.isBlank() && images.isEmpty()) return
         val projectId = container.activeProjectId.value.takeIf { it > 0 } ?: return
         agentJob?.cancel()
         _state.update { it.copy(approval = null, pendingQuestion = null) }
         val blocks = mutableListOf<Block>()
-        if (image != null) blocks.add(Block.Image(image.first, image.second))
+        for (img in images) blocks.add(Block.Image(img.first, img.second))
         if (text.isNotBlank()) blocks.add(Block.Text(text))
         val convMsg = ConvMessage(Role.User, blocks)
         conversation.add(convMsg)
@@ -274,7 +274,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 val queued = _state.value.queuedMessages.firstOrNull() ?: break
                 _state.update { it.copy(queuedMessages = it.queuedMessages.drop(1)) }
                 val queuedBlocks = buildList {
-                    if (queued.image != null) add(Block.Image(queued.image.first, queued.image.second))
+                    for (img in queued.images) add(Block.Image(img.first, img.second))
                     if (queued.text.isNotBlank()) add(Block.Text(queued.text))
                 }
                 if (queuedBlocks.isEmpty()) break
