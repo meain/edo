@@ -9,9 +9,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.focus.FocusRequester
@@ -51,6 +53,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.Image as ComposeImage
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -122,6 +125,33 @@ import com.edo.app.agent.ApprovalDecision
 import com.edo.app.llm.Block
 import com.edo.app.llm.Role
 import kotlinx.serialization.json.contentOrNull
+
+/**
+ * Keep the conversation pinned to the bottom with a smooth glide. Computes the
+ * exact pixel distance from the bottom edge of the last item to the bottom of
+ * the viewport and animates just that delta with a spring, so following streaming
+ * text or a new message reads as a continuous slide rather than a snap. When the
+ * bottom is far off-screen (thread load, or a jump from far up) it scrolls
+ * instantly instead, so fast streaming can never lag behind the text.
+ */
+private suspend fun androidx.compose.foundation.lazy.LazyListState.followBottom(totalItems: Int) {
+    if (totalItems <= 0) return
+    val info = layoutInfo
+    val last = info.visibleItemsInfo.lastOrNull()
+    val viewportHeight = info.viewportEndOffset - info.viewportStartOffset
+    if (last != null && last.index >= info.totalItemsCount - 1) {
+        val delta = (last.offset + last.size - info.viewportEndOffset).toFloat()
+        when {
+            delta <= 0f -> return // already resting at the bottom
+            delta > viewportHeight * 1.5f ->
+                scrollToItem(totalItems - 1, Int.MAX_VALUE / 2)
+            else -> animateScrollBy(delta, spring(stiffness = Spring.StiffnessMediumLow))
+        }
+    } else {
+        // Last item isn't even on screen — too far to animate pleasantly; snap.
+        scrollToItem(totalItems - 1, Int.MAX_VALUE / 2)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -198,19 +228,20 @@ fun ChatScreen(
     val isImeVisible = WindowInsets.isImeVisible
     val streamLen = state.streamingText.length
 
-    // Scroll to bottom on new items, keyboard opens, new persisted messages, or while streaming.
-    // Use a large scrollOffset to ensure we land at the bottom of the last item, not its top.
+    // Follow the bottom on new items, keyboard opens, or new persisted messages.
     LaunchedEffect(totalItems, isImeVisible, state.scrollVersion) {
         if (totalItems > 0) {
             if (isImeVisible) kotlinx.coroutines.delay(250) // wait for keyboard animation
-            listState.animateScrollToItem(totalItems - 1, scrollOffset = Int.MAX_VALUE / 2)
+            listState.followBottom(totalItems)
         }
     }
-    // Snap to the bottom as streaming text grows. Use scrollToItem (not animated)
-    // so each delta doesn't queue up a slow animation and lag behind the text.
+    // Follow the bottom as streaming text grows. Each chunk restarts this effect,
+    // so the in-flight spring retargets to the new bottom — a continuous glide
+    // instead of a per-chunk snap. Large jumps fall back to an instant scroll so
+    // fast streaming never lags behind the text.
     LaunchedEffect(streamLen) {
         if (totalItems > 0 && streamLen > 0) {
-            listState.scrollToItem(totalItems - 1, Int.MAX_VALUE / 2)
+            listState.followBottom(totalItems)
         }
     }
 

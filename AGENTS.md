@@ -56,14 +56,12 @@ The agent loads a skill's content on demand via `load_skill`. A built-in `create
 
 Toolchain: AGP 8.5.2, Kotlin 2.0.20 (with compose-compiler plugin), Gradle wrapper 8.10.2, JDK 17. Android SDK at `~/Android/sdk-edo` (path is in `local.properties`).
 
-```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17
-export PATH=$JAVA_HOME/bin:$PATH
-export ANDROID_HOME=$HOME/Android/sdk-edo
+The JDK 17 toolchain comes from the `flake.nix` dev shell (`nix develop` sets `JAVA_HOME` and `ANDROID_HOME`). The Android SDK is managed outside nix. Run Gradle through the shell:
 
-./gradlew --no-daemon :app:assembleDebug
-./gradlew --no-daemon :app:testDebugUnitTest
-./gradlew --no-daemon :app:compileDebugKotlin   # fastest sanity check
+```bash
+nix develop --command bash -c './gradlew --no-daemon :app:assembleDebug'
+nix develop --command bash -c './gradlew --no-daemon :app:testDebugUnitTest'
+nix develop --command bash -c './gradlew --no-daemon :app:compileDebugKotlin'   # fastest sanity check
 ```
 
 APK lands at `app/build/outputs/apk/debug/app-debug.apk`. Use `--no-daemon` — long-lived Gradle daemons have caused issues here.
