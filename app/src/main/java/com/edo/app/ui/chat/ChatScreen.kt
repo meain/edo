@@ -102,6 +102,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.material3.SmallFloatingActionButton
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -130,6 +136,14 @@ import com.edo.app.agent.ApprovalDecision
 import com.edo.app.llm.Block
 import com.edo.app.llm.Role
 import kotlinx.serialization.json.contentOrNull
+
+/** True when the last item's bottom edge is within [thresholdPx] of the viewport's bottom. */
+private fun androidx.compose.foundation.lazy.LazyListState.isNearBottom(thresholdPx: Float = 120f): Boolean {
+    val info = layoutInfo
+    val last = info.visibleItemsInfo.lastOrNull() ?: return true
+    if (last.index < info.totalItemsCount - 1) return false
+    return last.offset + last.size - info.viewportEndOffset <= thresholdPx
+}
 
 /**
  * Keep the conversation pinned to the bottom with a smooth glide. Computes the
@@ -233,6 +247,22 @@ fun ChatScreen(
 
     // --- Message list state (hoisted so bottomBar LaunchedEffect can share it) ---
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    // Whether the list should keep following new content. Off as soon as the user grabs
+    // the list (so new messages/tool calls don't yank them away from what they're
+    // reading); back on when they scroll to the bottom, tap "jump to latest", send a
+    // message, or open a different chat.
+    var followTail by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) followTail = false }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.filter { !it }.collect {
+            if (listState.isNearBottom()) followTail = true
+        }
+    }
+    LaunchedEffect(state.currentThread?.id) { followTail = true }
 
     // Index tool results by their tool_use id so completed assistant cards can
     // display the result inline. Tool result blocks live on subsequent user
@@ -275,8 +305,8 @@ fun ChatScreen(
     val streamLen = state.streamingText.length
 
     // Follow the bottom on new items, keyboard opens, or new persisted messages.
-    LaunchedEffect(totalItems, isImeVisible, state.scrollVersion) {
-        if (totalItems > 0) {
+    LaunchedEffect(totalItems, isImeVisible, state.scrollVersion, followTail) {
+        if (totalItems > 0 && followTail) {
             if (isImeVisible) kotlinx.coroutines.delay(250) // wait for keyboard animation
             listState.followBottom(totalItems)
         }
@@ -286,7 +316,7 @@ fun ChatScreen(
     // instead of a per-chunk snap. Large jumps fall back to an instant scroll so
     // fast streaming never lags behind the text.
     LaunchedEffect(streamLen) {
-        if (totalItems > 0 && streamLen > 0) {
+        if (totalItems > 0 && streamLen > 0 && followTail) {
             listState.followBottom(totalItems)
         }
     }
@@ -457,6 +487,19 @@ fun ChatScreen(
                             }
                         }
                     }
+                    if (!followTail) {
+                        SmallFloatingActionButton(
+                            onClick = {
+                                followTail = true
+                                scope.launch { listState.followBottom(totalItems) }
+                            },
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                        ) {
+                            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Jump to latest")
+                        }
+                    }
                 }
             }
 
@@ -609,6 +652,7 @@ fun ChatScreen(
                                         if (state.running) {
                                             vm.cancelAgent()
                                         } else {
+                                            followTail = true
                                             vm.sendUserMessage(composed.trim(), pendingImages)
                                             input = ""
                                             pendingImages = emptyList()
