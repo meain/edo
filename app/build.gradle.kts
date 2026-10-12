@@ -84,6 +84,11 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.client.logging)
 
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.ext.tables)
+    implementation(libs.commonmark.ext.strikethrough)
+    implementation(libs.commonmark.ext.task.list)
+
     implementation(libs.luaj.jse)
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.documentfile)

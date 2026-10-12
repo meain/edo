@@ -9,6 +9,7 @@ activity-compose = "1.9.2"
 lifecycle = "2.8.6"
 navigation = "2.8.1"
 room = "2.6.1"
+commonmark = "0.24.0"
 ktor = "2.3.12"
 security-crypto = "1.1.0-alpha06"
 documentfile = "1.0.1"
@@ -35,6 +36,11 @@ compose-material-icons = { module = "androidx.compose.material:material-icons-ex
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+
+commonmark = { module = "org.commonmark:commonmark", version.ref = "commonmark" }
+commonmark-ext-tables = { module = "org.commonmark:commonmark-ext-gfm-tables", version.ref = "commonmark" }
+commonmark-ext-strikethrough = { module = "org.commonmark:commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }
+commonmark-ext-task-list = { module = "org.commonmark:commonmark-ext-task-list-items", version.ref = "commonmark" }
 
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
