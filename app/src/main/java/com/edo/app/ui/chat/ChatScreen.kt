@@ -81,6 +81,7 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
@@ -195,6 +196,7 @@ fun ChatScreen(
     onOpenProjects: () -> Unit,
     onOpenThreads: () -> Unit,
     onOpenFiles: () -> Unit,
+    onOpenSchedules: () -> Unit,
 ) {
     val context = LocalContext.current
     val vm: ChatViewModel = viewModel(
@@ -446,6 +448,11 @@ fun ChatScreen(
                                 text = { Text("Files") },
                                 leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null) },
                                 onClick = { menuOpen = false; onOpenFiles() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Schedules") },
+                                leadingIcon = { Icon(Icons.Filled.Schedule, contentDescription = null) },
+                                onClick = { menuOpen = false; onOpenSchedules() },
                             )
                         }
                         DropdownMenuItem(

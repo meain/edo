@@ -6,6 +6,7 @@ import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Delete
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -114,15 +115,71 @@ interface MessageDao {
     suspend fun clearProject(projectId: Long)
 }
 
+/**
+ * A prompt that runs on its own in a project. [kind] is one of the `ScheduleKind` names;
+ * [nextRunAt] is epoch millis (0 = nothing pending), advanced by the scheduler as runs fire.
+ */
+@Entity(tableName = "schedules", indices = [Index("project_id")])
+data class ScheduleEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "project_id") val projectId: Long,
+    @ColumnInfo(name = "title") val title: String,
+    @ColumnInfo(name = "prompt") val prompt: String,
+    @ColumnInfo(name = "kind") val kind: String = "DAILY",
+    /** Minutes after local midnight, for DAILY / WEEKLY. */
+    @ColumnInfo(name = "minute_of_day") val minuteOfDay: Int = 9 * 60,
+    /** Bit 0 = Monday … bit 6 = Sunday, for WEEKLY. */
+    @ColumnInfo(name = "days_mask") val daysMask: Int = 0b1111111,
+    @ColumnInfo(name = "interval_minutes") val intervalMinutes: Int = 60,
+    @ColumnInfo(name = "enabled") val enabled: Boolean = true,
+    @ColumnInfo(name = "next_run_at") val nextRunAt: Long = 0,
+    @ColumnInfo(name = "last_run_at") val lastRunAt: Long = 0,
+    /** "", OK, FAILED, TIMEOUT or SKIPPED. */
+    @ColumnInfo(name = "last_status") val lastStatus: String = "",
+    @ColumnInfo(name = "last_thread_id") val lastThreadId: Long = 0,
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+)
+
+@Dao
+interface ScheduleDao {
+    @Query("SELECT * FROM schedules WHERE project_id = :projectId ORDER BY created_at ASC")
+    fun observeForProject(projectId: Long): Flow<List<ScheduleEntity>>
+
+    @Query("SELECT * FROM schedules")
+    suspend fun listAll(): List<ScheduleEntity>
+
+    @Query("SELECT * FROM schedules WHERE id = :id")
+    suspend fun getById(id: Long): ScheduleEntity?
+
+    @Query("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at > 0 AND next_run_at <= :now")
+    suspend fun listDue(now: Long): List<ScheduleEntity>
+
+    @Query("SELECT MIN(next_run_at) FROM schedules WHERE enabled = 1 AND next_run_at > 0")
+    suspend fun earliestNextRun(): Long?
+
+    @Insert
+    suspend fun insert(s: ScheduleEntity): Long
+
+    @Update
+    suspend fun update(s: ScheduleEntity)
+
+    @Delete
+    suspend fun delete(s: ScheduleEntity)
+
+    @Query("DELETE FROM schedules WHERE project_id = :projectId")
+    suspend fun deleteForProject(projectId: Long)
+}
+
 @Database(
-    entities = [ProjectEntity::class, ThreadEntity::class, MessageEntity::class],
-    version = 5,
+    entities = [ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class],
+    version = 6,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun projects(): ProjectDao
     abstract fun threads(): ThreadDao
     abstract fun messages(): MessageDao
+    abstract fun schedules(): ScheduleDao
 
     companion object {
         @Volatile private var instance: ChatDatabase? = null
@@ -143,13 +200,37 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v5 → v6: scheduled prompts. */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS schedules (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "project_id INTEGER NOT NULL, " +
+                        "title TEXT NOT NULL, " +
+                        "prompt TEXT NOT NULL, " +
+                        "kind TEXT NOT NULL, " +
+                        "minute_of_day INTEGER NOT NULL, " +
+                        "days_mask INTEGER NOT NULL, " +
+                        "interval_minutes INTEGER NOT NULL, " +
+                        "enabled INTEGER NOT NULL, " +
+                        "next_run_at INTEGER NOT NULL, " +
+                        "last_run_at INTEGER NOT NULL, " +
+                        "last_status TEXT NOT NULL, " +
+                        "last_thread_id INTEGER NOT NULL, " +
+                        "created_at INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_schedules_project_id ON schedules (project_id)")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }

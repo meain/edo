@@ -20,6 +20,7 @@ import com.edo.app.agent.LoadSkillTool
 import com.edo.app.agent.LsTool
 import com.edo.app.agent.ReadFileTool
 import com.edo.app.agent.RunLuaTool
+import com.edo.app.agent.ScheduleTool
 import com.edo.app.agent.SafWorkspace
 import com.edo.app.agent.ToolRegistry
 import com.edo.app.agent.WebSearchTool
@@ -72,6 +73,17 @@ class ChatSession internal constructor(
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private var job: Job? = null
+
+    /**
+     * Set for scheduled runs, where nobody is watching: tool calls that need approval are denied,
+     * `ask_user` gets a canned answer, and the run never steals the on-screen chat.
+     */
+    internal var unattended = false
+
+    /** Suspends until the current run (and any queued follow-ups) has finished. */
+    internal suspend fun awaitIdle() {
+        job?.join()
+    }
 
     /** True while a run is active or messages are waiting to be sent. */
     val isBusy: Boolean get() = job?.isActive == true || _state.value.queuedMessages.isNotEmpty()
@@ -149,7 +161,7 @@ class ChatSession internal constructor(
                 titleSet = true
                 sessions.promote(this@ChatSession)
                 // Show the new chat, unless the user has already navigated elsewhere.
-                if (container.activeProjectId.value == projectId && container.activeThreadId.value <= 0) {
+                if (!unattended && container.activeProjectId.value == projectId && container.activeThreadId.value <= 0) {
                     container.setActiveThread(id)
                 }
                 _state.update { it.copy(currentThread = container.db.threads().getById(id)) }
@@ -164,7 +176,7 @@ class ChatSession internal constructor(
             persistedCount = conversation.size
             _state.update { it.copy(messages = it.messages + UiMessage(rowId, Role.User, blocks)) }
             runAgent()
-            if (needsSmartTitle && _state.value.error == null) {
+            if (needsSmartTitle && !unattended && _state.value.error == null) {
                 container.appScope.launch { generateTitle() }
             }
             drainQueue()
@@ -305,7 +317,8 @@ class ChatSession internal constructor(
             return
         }
         val ws = workspaceFor(project)
-        val askUser: suspend (String, List<String>) -> String = { question, options ->
+        val askUser: suspend (String, List<String>) -> String = ask@{ question, options ->
+            if (unattended) return@ask "No user is available (scheduled run). Make your best judgment and continue."
             val deferred = CompletableDeferred<String>()
             val id = "question_${System.currentTimeMillis()}"
             _state.update { it.copy(pendingQuestion = PendingQuestion(id, question, options, deferred)) }
@@ -314,7 +327,9 @@ class ChatSession internal constructor(
             }
         }
         val tools = ToolRegistry(
-            listOf(
+            listOfNotNull(
+                // Scheduled runs don't get it, so a schedule can't create more schedules.
+                if (unattended) null else ScheduleTool(container.scheduler, projectId),
                 ReadFileTool(ws),
                 WriteFileTool(ws),
                 EditFileTool(ws),
@@ -336,6 +351,8 @@ class ChatSession internal constructor(
         val gate = ApprovalGate { name, argsJson ->
             if (yolo) {
                 ApprovalDecision.AllowOnce
+            } else if (unattended) {
+                ApprovalDecision.Deny
             } else {
                 val deferred = CompletableDeferred<ApprovalDecision>()
                 val pendingId = "${name}_${System.currentTimeMillis()}"
@@ -345,7 +362,7 @@ class ChatSession internal constructor(
                 }
             }
         }
-        val systemPrompt = buildSystemPrompt(ws)
+        val systemPrompt = buildSystemPrompt(ws) + if (unattended) UNATTENDED_NOTE else ""
         _state.update { it.copy(running = true, error = null) }
         try {
             Agent(llm, tools, gate, systemPrompt = systemPrompt, maxTurns = settings.maxTurns).run(conversation).collect { ev -> handle(ev) }
@@ -427,3 +444,8 @@ class ChatSession internal constructor(
         _state.update { it.copy(messages = uiMsgs, streamingText = "", pendingToolCalls = emptyMap(), scrollVersion = it.scrollVersion + 1) }
     }
 }
+
+private const val UNATTENDED_NOTE = "\n\n# Scheduled run\n\n" +
+    "This is an unattended, scheduled run. Nobody can answer questions or approve actions, so " +
+    "don't ask; tools that need approval will be denied unless the project allows them. Keep the " +
+    "final reply short, since it is shown in a notification."

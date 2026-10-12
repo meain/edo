@@ -41,6 +41,19 @@ class ChatSessions(private val app: Application, private val container: AppConta
         return registered
     }
 
+    /**
+     * A fresh unattended session for a scheduled run. Kept apart from [draft] so it never
+     * touches the user's own empty chat; it registers under its thread id on first send.
+     */
+    suspend fun unattended(projectId: Long): ChatSession? {
+        val project = container.db.projects().getById(projectId) ?: return null
+        return ChatSession(
+            app, container, this, projectId, -1L,
+            ChatUiState(currentProject = project),
+            mutableListOf(), 0, false,
+        ).also { it.unattended = true }
+    }
+
     /** A draft just got a thread: register it under its real id. */
     internal fun promote(session: ChatSession) {
         if (drafts[session.projectId] === session) drafts.remove(session.projectId)

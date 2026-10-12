@@ -5,6 +5,7 @@ import android.net.Uri
 import com.edo.app.data.ChatDatabase
 import com.edo.app.data.EncryptedSettingsStore
 import com.edo.app.data.SettingsStore
+import com.edo.app.schedule.ScheduleManager
 import com.edo.app.ui.chat.ChatSessions
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class AppContainer(private val app: Application) {
     val settings: SettingsStore = EncryptedSettingsStore(app)
@@ -33,7 +35,9 @@ class AppContainer(private val app: Application) {
     /** Per-chat conversations and agent runs; they outlive the screen and the active chat. */
     val chatSessions: ChatSessions = ChatSessions(app, this)
 
-    private val _activeProjectId = MutableStateFlow(settings.load().activeProjectId)
+    val scheduler: ScheduleManager = ScheduleManager(app, this)
+
+    private val _activeProjectId =MutableStateFlow(settings.load().activeProjectId)
     val activeProjectId: StateFlow<Long> = _activeProjectId.asStateFlow()
 
     private val _activeThreadId = MutableStateFlow(settings.load().activeThreadId)
@@ -84,5 +88,8 @@ class EdoApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // Make sure the alarm matches the table (e.g. after the system cleared it). Not a
+        // resync: if this process was started by the alarm itself, its run must not be skipped.
+        container.appScope.launch { container.scheduler.rearm() }
     }
 }

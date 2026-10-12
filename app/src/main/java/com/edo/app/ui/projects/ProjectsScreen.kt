@@ -175,6 +175,7 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
                         scope.launch {
                             container.db.messages().clearProject(project.id)
                             container.db.threads().deleteForProject(project.id)
+                            container.scheduler.deleteForProject(project.id)
                             container.db.projects().delete(project)
                             if (activeId == project.id) container.setActiveProject(-1L)
                         }

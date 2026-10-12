@@ -29,11 +29,13 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.dialog
 import androidx.navigation.compose.rememberNavController
 import com.edo.app.ui.chat.ChatScreen
+import com.edo.app.schedule.ScheduleNotifier
 import com.edo.app.ui.PanelSide
 import com.edo.app.ui.SwipePanels
 import com.edo.app.ui.files.FilesScreen
 import com.edo.app.ui.rememberSwipePanelsState
 import com.edo.app.ui.projects.ProjectsScreen
+import com.edo.app.ui.schedules.SchedulesScreen
 import com.edo.app.ui.settings.SettingsScreen
 import com.edo.app.ui.share.ShareScreen
 import com.edo.app.ui.theme.EdoTheme
@@ -46,6 +48,21 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleShareIntent(intent)
+        handleOpenThreadIntent(intent)
+    }
+
+    /** A scheduled-run notification was tapped: show the thread it created. */
+    private fun handleOpenThreadIntent(intent: Intent?) {
+        if (intent == null || !intent.hasExtra(ScheduleNotifier.EXTRA_THREAD_ID)) return
+        val projectId = intent.getLongExtra(ScheduleNotifier.EXTRA_PROJECT_ID, -1L)
+        val threadId = intent.getLongExtra(ScheduleNotifier.EXTRA_THREAD_ID, -1L)
+        // Consume the extras so a rotation doesn't re-apply them over later navigation.
+        intent.removeExtra(ScheduleNotifier.EXTRA_THREAD_ID)
+        intent.removeExtra(ScheduleNotifier.EXTRA_PROJECT_ID)
+        if (projectId <= 0) return
+        val container = (application as EdoApp).container
+        container.setActiveProject(projectId)
+        if (threadId > 0) container.setActiveThread(threadId)
     }
 
     /** Turns an ACTION_SEND / ACTION_SEND_MULTIPLE intent into pending shared content. */
@@ -75,7 +92,10 @@ class MainActivity : ComponentActivity() {
         )
         val container = (application as EdoApp).container
         // On rotation etc. the original share intent is redelivered; only handle it once.
-        if (savedInstanceState == null) handleShareIntent(intent)
+        if (savedInstanceState == null) {
+            handleShareIntent(intent)
+            handleOpenThreadIntent(intent)
+        }
         setContent {
             val isDark = isSystemInDarkTheme()
             EdoTheme(darkTheme = isDark) {
@@ -133,8 +153,12 @@ class MainActivity : ComponentActivity() {
                                     onOpenProjects = { open("projects") },
                                     onOpenThreads = { panels.open(PanelSide.Left) },
                                     onOpenFiles = { panels.open(PanelSide.Right) },
+                                    onOpenSchedules = { open("schedules") },
                                 )
                             }
+                        }
+                        composable("schedules") {
+                            SchedulesScreen(container = container, onBack = popBack)
                         }
                         dialog("projects") {
                             ProjectsScreen(container = container, onBack = popBack)
