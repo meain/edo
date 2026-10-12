@@ -300,10 +300,8 @@ fun ChatScreen(
                     }
                 },
                 navigationIcon = {
-                    if (state.currentProject != null) {
-                        IconButton(onClick = onOpenThreads) {
-                            Icon(Icons.Filled.Menu, contentDescription = "Chat history")
-                        }
+                    IconButton(onClick = onOpenThreads) {
+                        Icon(Icons.Filled.Menu, contentDescription = "Chat history")
                     }
                 },
                 actions = {
