@@ -246,6 +246,9 @@ fun ChatScreen(
     }
 
     Scaffold(
+        // Bottom insets (IME / nav bar) are handled by the content column and input bar;
+        // letting Scaffold add them too left a doubled gap under the input.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
@@ -566,9 +569,10 @@ fun ChatScreen(
             Column(
                 Modifier
                     .padding(horizontal = 20.dp)
-                    .padding(bottom = 32.dp)
+                    .padding(bottom = 16.dp)
                     .imePadding()
-                    .windowInsetsPadding(WindowInsets.navigationBars),
+                    // The IME inset already covers the nav bar; excluding it avoids counting it twice.
+                    .windowInsetsPadding(WindowInsets.navigationBars.exclude(WindowInsets.ime)),
             ) {
                 Text("Question", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(4.dp))

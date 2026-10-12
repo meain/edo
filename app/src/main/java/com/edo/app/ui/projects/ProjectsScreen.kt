@@ -14,7 +14,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -341,8 +347,9 @@ private fun CreateProjectSheet(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .padding(bottom = 32.dp)
-            .navigationBarsPadding()
+            .padding(bottom = 16.dp)
+            .imePadding()
+            .windowInsetsPadding(WindowInsets.navigationBars.exclude(WindowInsets.ime))
             .animateContentSize(),
     ) {
         Text("New Project", style = MaterialTheme.typography.titleLarge)
@@ -475,8 +482,9 @@ private fun EditProjectSheet(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .padding(bottom = 32.dp)
-            .navigationBarsPadding()
+            .padding(bottom = 16.dp)
+            .imePadding()
+            .windowInsetsPadding(WindowInsets.navigationBars.exclude(WindowInsets.ime))
             .animateContentSize(),
     ) {
         Text("Project settings", style = MaterialTheme.typography.titleLarge)

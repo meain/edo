@@ -4,10 +4,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 
 // Neutral, monochrome palette modelled on the ChatGPT Android app:
@@ -86,10 +88,38 @@ private val EdoShapes = Shapes(
     extraLarge = RoundedCornerShape(28.dp),
 )
 
+private const val FONT_SCALE = 1.1f
+
+private fun TextStyle.scaled(): TextStyle = copy(
+    fontSize = fontSize * FONT_SCALE,
+    lineHeight = lineHeight * FONT_SCALE,
+)
+
+private val EdoTypography = Typography().let { t ->
+    Typography(
+        displayLarge = t.displayLarge.scaled(),
+        displayMedium = t.displayMedium.scaled(),
+        displaySmall = t.displaySmall.scaled(),
+        headlineLarge = t.headlineLarge.scaled(),
+        headlineMedium = t.headlineMedium.scaled(),
+        headlineSmall = t.headlineSmall.scaled(),
+        titleLarge = t.titleLarge.scaled(),
+        titleMedium = t.titleMedium.scaled(),
+        titleSmall = t.titleSmall.scaled(),
+        bodyLarge = t.bodyLarge.scaled(),
+        bodyMedium = t.bodyMedium.scaled(),
+        bodySmall = t.bodySmall.scaled(),
+        labelLarge = t.labelLarge.scaled(),
+        labelMedium = t.labelMedium.scaled(),
+        labelSmall = t.labelSmall.scaled(),
+    )
+}
+
 @Composable
 fun EdoTheme(darkTheme: Boolean, content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColors else LightColors,
+        typography = EdoTypography,
         shapes = EdoShapes,
         content = content,
     )
