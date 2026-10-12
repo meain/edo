@@ -6,8 +6,10 @@ import io.ktor.client.request.headers
 import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
@@ -48,6 +50,11 @@ class OpenAIClient(
             headers {
                 if (apiKey.isNotEmpty()) append("Authorization", "Bearer $apiKey")
                 append("accept", "text/event-stream")
+                if (baseUrl.contains("openrouter.ai")) {
+                    // App attribution: makes Edo show up as an app on OpenRouter.
+                    append("HTTP-Referer", "https://github.com/meain/edo")
+                    append("X-Title", "Edo")
+                }
             }
             contentType(ContentType.Application.Json)
             setBody(body)
@@ -56,6 +63,10 @@ class OpenAIClient(
                 socketTimeoutMillis = 5 * 60_000L
             }
         }.execute { response ->
+            if (!response.status.isSuccess()) {
+                emit(LlmEvent.Failure(AnthropicClient.httpErrorMessage(response.status.value, response.bodyAsText())))
+                return@execute
+            }
             val channel = response.bodyAsChannel()
             val lines = AnthropicClient.readLines(channel)
             parseOpenAIStream(lines).collect { emit(it) }

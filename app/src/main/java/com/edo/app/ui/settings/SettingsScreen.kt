@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -34,11 +35,48 @@ import androidx.compose.ui.unit.dp
 import com.edo.app.AppContainer
 import com.edo.app.data.AppSettings
 import com.edo.app.data.Provider
+import com.edo.app.llm.AnthropicClient
+import com.edo.app.llm.Block
+import com.edo.app.llm.ConvMessage
+import com.edo.app.llm.LlmClient
+import com.edo.app.llm.LlmEvent
+import com.edo.app.llm.OpenAIClient
+import com.edo.app.llm.Role
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.launch
+
+/** Sends a one-word prompt with the unsaved settings; returns (ok, message). */
+private suspend fun testConnection(container: AppContainer, s: AppSettings): Pair<Boolean, String> {
+    val llm: LlmClient = when (s.provider) {
+        Provider.Anthropic -> AnthropicClient(s.baseUrl, s.apiKey, s.model, container.http, maxTokens = 16)
+        Provider.OpenAI -> OpenAIClient(s.baseUrl, s.apiKey, s.model, container.http)
+    }
+    return try {
+        var result: Pair<Boolean, String>? = null
+        llm.stream(null, listOf(ConvMessage(Role.User, listOf(Block.Text("Reply with: ok")))), emptyList())
+            .takeWhile { result == null }
+            .collect { ev ->
+                when (ev) {
+                    is LlmEvent.Failure -> result = false to ev.message
+                    is LlmEvent.TurnEnd -> result = true to "OK — ${s.model} responded"
+                    else -> Unit
+                }
+            }
+        result ?: (false to "No response from server")
+    } catch (t: Throwable) {
+        if (t is CancellationException) throw t
+        false to (t.message ?: t.javaClass.simpleName)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
     var current by remember { mutableStateOf(container.settings.load()) }
+    var testing by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -109,6 +147,26 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = {
+                    testing = true
+                    testResult = null
+                    scope.launch {
+                        testResult = testConnection(container, current)
+                        testing = false
+                    }
+                },
+                enabled = !testing,
+            ) { Text(if (testing) "Testing…" else "Test connection") }
+            testResult?.let { (ok, msg) ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    msg,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (ok) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                )
+            }
             Spacer(Modifier.height(24.dp))
             Row {
                 Button(onClick = {

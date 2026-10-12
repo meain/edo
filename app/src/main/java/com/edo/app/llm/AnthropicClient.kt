@@ -6,8 +6,10 @@ import io.ktor.client.request.headers
 import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.flow.Flow
@@ -57,6 +59,10 @@ class AnthropicClient(
                 socketTimeoutMillis = 5 * 60_000L
             }
         }.execute { response ->
+            if (!response.status.isSuccess()) {
+                emit(LlmEvent.Failure(httpErrorMessage(response.status.value, response.bodyAsText())))
+                return@execute
+            }
             val channel = response.bodyAsChannel()
             val lines = readLines(channel)
             parseAnthropicStream(lines).collect { emit(it) }
@@ -68,6 +74,19 @@ class AnthropicClient(
             ignoreUnknownKeys = true
             isLenient = true
             encodeDefaults = true
+        }
+
+        /** Turn a non-2xx response body into a short message, preferring `error.message` from the JSON. */
+        internal fun httpErrorMessage(status: Int, body: String): String {
+            val msg = runCatching {
+                val err = DefaultJson.parseToJsonElement(body).jsonObject["error"]
+                when (err) {
+                    is JsonObject -> err["message"]?.jsonPrimitive?.contentOrNull
+                    is JsonPrimitive -> err.contentOrNull
+                    else -> null
+                }
+            }.getOrNull() ?: body.trim().take(300)
+            return if (msg.isEmpty()) "HTTP $status" else "HTTP $status: $msg"
         }
 
         /** Read newline-delimited UTF-8 lines from a byte channel into a Flow. */
