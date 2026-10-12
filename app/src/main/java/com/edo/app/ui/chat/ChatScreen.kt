@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -74,6 +75,8 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
@@ -82,6 +85,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -216,13 +221,31 @@ fun ChatScreen(
             }
         }
     }
-    val visibleMessages = remember(state.messages) {
-        state.messages.filter { msg ->
-            msg.role != Role.User || msg.blocks.any { it !is Block.ToolResult }
+    // Flatten messages into list items: text messages stay as-is, and consecutive tool
+    // calls (with no text between them) collapse into one ToolGroup.
+    val chatItems = remember(state.messages) {
+        buildList<ChatItem> {
+            for (msg in state.messages) {
+                if (msg.role == Role.User) {
+                    if (msg.blocks.any { it !is Block.ToolResult }) add(ChatItem.Msg(msg))
+                    continue
+                }
+                if (msg.role != Role.Assistant) continue
+                if (msg.blocks.any { it is Block.Text }) add(ChatItem.Msg(msg))
+                val uses = msg.blocks.filterIsInstance<Block.ToolUse>()
+                if (uses.isNotEmpty()) {
+                    val last = lastOrNull()
+                    if (last is ChatItem.ToolGroup) {
+                        this[lastIndex] = last.copy(uses = last.uses + uses)
+                    } else {
+                        add(ChatItem.ToolGroup(uses.first().id, uses))
+                    }
+                }
+            }
         }
     }
 
-    val totalItems = visibleMessages.size +
+    val totalItems = chatItems.size +
             (if (state.streamingText.isNotEmpty()) 1 else 0) +
             (if (state.pendingToolCalls.isNotEmpty()) 1 else 0)
     val isImeVisible = WindowInsets.isImeVisible
@@ -274,27 +297,17 @@ fun ChatScreen(
                                 )
                             }
                         }
-                        val subtitle = state.currentThread?.title
-                            ?: if (state.currentProject != null) "New chat" else null
-                        if (subtitle != null) {
-                            Text(
-                                text = subtitle,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                    }
+                },
+                navigationIcon = {
+                    if (state.currentProject != null) {
+                        IconButton(onClick = onOpenThreads) {
+                            Icon(Icons.Filled.Menu, contentDescription = "Chat history")
                         }
                     }
                 },
                 actions = {
                     if (state.currentProject != null) {
-                        IconButton(onClick = onOpenFiles) {
-                            Icon(Icons.Filled.FolderOpen, contentDescription = "Files")
-                        }
-                        IconButton(onClick = onOpenThreads) {
-                            Icon(Icons.Filled.History, contentDescription = "Chat history")
-                        }
                         IconButton(
                             onClick = { vm.newChat() },
                             enabled = state.running || state.currentThread != null || state.messages.isNotEmpty(),
@@ -302,8 +315,28 @@ fun ChatScreen(
                             Icon(Icons.Filled.Edit, contentDescription = "New chat")
                         }
                     }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    var menuOpen by remember { mutableStateOf(false) }
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (state.currentProject != null) {
+                            DropdownMenuItem(
+                                text = { Text("Files") },
+                                leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null) },
+                                onClick = { menuOpen = false; onOpenFiles() },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Projects") },
+                            leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                            onClick = { menuOpen = false; onOpenProjects() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Settings") },
+                            leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                            onClick = { menuOpen = false; onOpenSettings() },
+                        )
                     }
                 },
             )
@@ -358,8 +391,17 @@ fun ChatScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(visibleMessages, key = { it.id }) { msg ->
-                            MessageBubble(msg, expandedToolIds, toolResults) { viewingImage = it }
+                        itemsIndexed(chatItems, key = { _, item -> item.key }) { index, item ->
+                            when (item) {
+                                is ChatItem.Msg ->
+                                    MessageBubble(item.msg, expandedToolIds) { viewingImage = it }
+                                is ChatItem.ToolGroup -> {
+                                    // Fold once something follows the group (or the run is over).
+                                    val folded = index < chatItems.lastIndex ||
+                                        (!state.running && state.pendingToolCalls.isEmpty())
+                                    ToolGroupView(item, toolResults, expandedToolIds, folded)
+                                }
+                            }
                         }
                         if (state.streamingText.isNotEmpty()) {
                             item("streaming") {
@@ -398,7 +440,7 @@ fun ChatScreen(
             }
 
             // --- Input bar pinned to bottom of column ---
-            Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+            Surface(color = MaterialTheme.colorScheme.background) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -449,7 +491,12 @@ fun ChatScreen(
                             onRemove = { pendingTextFile = null },
                         )
                     }
-                    Row(verticalAlignment = Alignment.Bottom) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainer),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
                         IconButton(
                             onClick = { pickFiles.launch(arrayOf("*/*")) },
                             modifier = Modifier.padding(bottom = 2.dp),
@@ -530,20 +577,28 @@ fun ChatScreen(
                                         pendingTextFile = null
                                     }
                                 },
-                                modifier = Modifier.padding(bottom = 2.dp),
+                                modifier = Modifier
+                                    .padding(start = 4.dp, end = 8.dp, bottom = 8.dp)
+                                    .size(36.dp)
+                                    .background(
+                                        if (state.running || (!state.needsProject && hasContent))
+                                            MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                        androidx.compose.foundation.shape.CircleShape,
+                                    ),
                             ) {
                                 if (state.running) {
                                     Icon(
                                         Icons.Filled.Stop,
                                         contentDescription = "Stop",
-                                        tint = MaterialTheme.colorScheme.primary,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
                                     )
                                 } else {
                                     Icon(
                                         Icons.AutoMirrored.Filled.Send,
                                         contentDescription = "Send",
                                         tint = if (!state.needsProject && hasContent)
-                                            MaterialTheme.colorScheme.primary
+                                            MaterialTheme.colorScheme.onPrimary
                                         else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
@@ -836,7 +891,6 @@ private fun NoProjectPlaceholder(onOpenProjects: () -> Unit) {
 private fun MessageBubble(
     msg: UiMessage,
     expandedIds: MutableMap<String, Boolean>,
-    toolResults: Map<String, Block.ToolResult>,
     onImageClick: (android.graphics.Bitmap) -> Unit = {},
 ) {
     val clipboard = LocalClipboardManager.current
@@ -874,12 +928,10 @@ private fun MessageBubble(
                     }
                     if (text.isNotEmpty()) {
                         Surface(
-                            color = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-                            tonalElevation = 2.dp,
-                            shadowElevation = 2.dp,
-                            modifier = Modifier.combinedClickable(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.widthIn(max = 300.dp).combinedClickable(
                                 onClick = {},
                                 onLongClick = {
                                     clipboard.setText(AnnotatedString(text))
@@ -891,8 +943,8 @@ private fun MessageBubble(
                         ) {
                             Text(
                                 text = text,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                style = MaterialTheme.typography.bodyLarge,
                             )
                         }
                     }
@@ -902,37 +954,13 @@ private fun MessageBubble(
 
         Role.Assistant -> {
             val textBlocks = msg.blocks.filterIsInstance<Block.Text>()
-            val toolUses = msg.blocks.filterIsInstance<Block.ToolUse>()
-            Column {
-                if (textBlocks.isNotEmpty()) {
-                    AssistantBubble(
-                        text = textBlocks.joinToString("\n\n") { it.text },
-                        isStreaming = false,
-                        expandedIds = expandedIds,
-                    )
-                }
-                if (toolUses.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        for (t in toolUses) {
-                            val expanded = expandedIds[t.id] == true
-                            val res = toolResults[t.id]
-                            CompletedToolCard(
-                                name = t.name,
-                                argsJson = t.argsJson,
-                                result = res?.content,
-                                isError = res?.isError == true,
-                                expanded = expanded,
-                                onToggle = { expandedIds[t.id] = !expanded },
-                                statusColor = when {
-                                    res?.isError == true -> MaterialTheme.colorScheme.errorContainer
-                                    res != null -> MaterialTheme.colorScheme.surfaceContainerHigh
-                                    else -> MaterialTheme.colorScheme.surfaceContainerLow
-                                },
-                            )
-                        }
-                    }
-                }
+            // Tool calls are rendered separately (see ToolGroup) so consecutive ones can fold together.
+            if (textBlocks.isNotEmpty()) {
+                AssistantBubble(
+                    text = textBlocks.joinToString("\n\n") { it.text },
+                    isStreaming = false,
+                    expandedIds = expandedIds,
+                )
             }
         }
 
@@ -946,11 +974,10 @@ private fun AssistantBubble(text: String, isStreaming: Boolean, expandedIds: Mut
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     Row(Modifier.fillMaxWidth()) {
+        // No bubble: assistant replies sit directly on the background, full width.
         Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp),
-            shadowElevation = 2.dp,
-            modifier = Modifier.combinedClickable(
+            color = Color.Transparent,
+            modifier = Modifier.weight(1f).combinedClickable(
                 onClick = {},
                 onLongClick = {
                     clipboard.setText(AnnotatedString(text))
@@ -960,7 +987,7 @@ private fun AssistantBubble(text: String, isStreaming: Boolean, expandedIds: Mut
                 },
             ),
         ) {
-            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
                 MarkdownText(text = text)
                 if (isStreaming) {
                     Text(
@@ -970,19 +997,12 @@ private fun AssistantBubble(text: String, isStreaming: Boolean, expandedIds: Mut
                 }
             }
         }
-        Spacer(Modifier.weight(1f))
     }
 }
 
 @Composable
 private fun ToolCallCard(tc: PendingToolUi, expandedIds: MutableMap<String, Boolean>) {
     val expanded = expandedIds[tc.id] == true
-    val statusColor = when {
-        tc.isError -> MaterialTheme.colorScheme.errorContainer
-        tc.result != null -> MaterialTheme.colorScheme.surfaceContainerHigh
-        tc.approved == false -> MaterialTheme.colorScheme.errorContainer
-        else -> MaterialTheme.colorScheme.secondaryContainer
-    }
     CompletedToolCard(
         name = tc.name,
         argsJson = tc.argsJson,
@@ -990,10 +1010,79 @@ private fun ToolCallCard(tc: PendingToolUi, expandedIds: MutableMap<String, Bool
         isError = tc.isError || tc.approved == false,
         expanded = expanded,
         onToggle = { expandedIds[tc.id] = !expanded },
-        statusColor = statusColor,
     )
 }
 
+/** One row in the chat list: a text message, or a run of consecutive tool calls. */
+private sealed interface ChatItem {
+    val key: String
+
+    data class Msg(val msg: UiMessage) : ChatItem {
+        override val key get() = "msg-${msg.id}"
+    }
+
+    data class ToolGroup(val firstId: String, val uses: List<Block.ToolUse>) : ChatItem {
+        override val key get() = "tools-$firstId"
+    }
+}
+
+/**
+ * A run of tool calls. While in progress each call is a faded line; once folded the
+ * whole run is a single "Used N tools" line that expands back to the individual lines.
+ */
+@Composable
+private fun ToolGroupView(
+    group: ChatItem.ToolGroup,
+    toolResults: Map<String, Block.ToolResult>,
+    expandedIds: MutableMap<String, Boolean>,
+    folded: Boolean,
+) {
+    val groupKey = group.key
+    val groupExpanded = expandedIds[groupKey] == true
+    Column(Modifier.animateContentSize()) {
+        if (folded) {
+            val failed = group.uses.count { toolResults[it.id]?.isError == true }
+            val label = buildString {
+                append("Used ${group.uses.size} tool")
+                if (group.uses.size != 1) append("s")
+                if (failed > 0) append(" · $failed failed")
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expandedIds[groupKey] = !groupExpanded }
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                    .alpha(FADED_ALPHA),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Icon(
+                    if (groupExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    null,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+        if (!folded || groupExpanded) {
+            for (t in group.uses) {
+                val res = toolResults[t.id]
+                val expanded = expandedIds[t.id] == true
+                CompletedToolCard(
+                    name = t.name,
+                    argsJson = t.argsJson,
+                    result = res?.content,
+                    isError = res?.isError == true,
+                    expanded = expanded,
+                    onToggle = { expandedIds[t.id] = !expanded },
+                )
+            }
+        }
+    }
+}
+
+private const val FADED_ALPHA = 0.55f
+
+/** A tool call as a faded single line; tap to expand its arguments and result. */
 @Composable
 private fun CompletedToolCard(
     name: String,
@@ -1002,61 +1091,49 @@ private fun CompletedToolCard(
     isError: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
-    statusColor: Color = MaterialTheme.colorScheme.surfaceVariant,
 ) {
-    Surface(
-        color = statusColor,
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.animateContentSize(),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onToggle)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+        Row(
+            modifier = Modifier.alpha(if (isError) 0.9f else FADED_ALPHA),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    iconForTool(name, isError),
-                    null,
-                    modifier = Modifier.size(14.dp),
-                    tint = if (isError) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.tertiary,
-                )
+            Icon(
+                iconForTool(name, isError),
+                null,
+                modifier = Modifier.size(14.dp),
+                tint = if (isError) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(6.dp))
+            val (label, detail) = toolHeader(name, argsJson)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+            if (detail.isNotBlank()) {
                 Spacer(Modifier.width(6.dp))
-                val (label, detail) = toolHeader(name, argsJson)
-                Row(
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    if (detail.isNotBlank()) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            detail,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-                Icon(
-                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            } else {
+                Spacer(Modifier.weight(1f))
             }
-            AnimatedVisibility(visible = expanded) {
-                ToolExpandedContent(name = name, argsJson = argsJson, result = result, isError = isError)
-            }
+        }
+        AnimatedVisibility(visible = expanded) {
+            ToolExpandedContent(name = name, argsJson = argsJson, result = result, isError = isError)
         }
     }
 }
@@ -1313,6 +1390,7 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
             val url = s("url") ?: ""
             "$method $url"
         }
+        "web_search" -> s("query") ?: ""
         "load_skill" -> s("name") ?: ""
         "current_datetime" -> ""
         "calculator" -> s("expression") ?: ""
@@ -1327,6 +1405,7 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
         "ls" -> "List"
         "grep" -> "Grep"
         "http_request" -> "HTTP"
+        "web_search" -> "Search"
         "load_skill" -> "Skill"
         "current_datetime" -> "Time"
         "calculator" -> "Calc"
@@ -1357,7 +1436,7 @@ internal fun iconForTool(name: String, isError: Boolean): androidx.compose.ui.gr
     name == "delete_file" -> Icons.Filled.DeleteOutline
     name == "copy_file" -> Icons.Filled.ContentCopy
     name == "ls" -> Icons.Filled.Folder
-    name == "grep" -> Icons.Filled.Search
+    name == "grep" || name == "web_search" -> Icons.Filled.Search
     name == "http_request" -> Icons.Filled.Language
     name == "load_skill" -> Icons.Filled.AutoAwesome
     name == "current_datetime" -> Icons.Filled.Schedule
