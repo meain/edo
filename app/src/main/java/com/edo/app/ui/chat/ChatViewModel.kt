@@ -29,6 +29,7 @@ import com.edo.app.agent.WebSearchTool
 import com.edo.app.agent.WriteFileTool
 import com.edo.app.agent.AgentEvent
 import com.edo.app.agent.buildSystemPrompt
+import com.edo.app.data.AppSettings
 import com.edo.app.data.MessageEntity
 import com.edo.app.data.ProjectEntity
 import com.edo.app.data.Provider
@@ -37,6 +38,7 @@ import com.edo.app.llm.AnthropicClient
 import com.edo.app.llm.Block
 import com.edo.app.llm.ConvMessage
 import com.edo.app.llm.LlmClient
+import com.edo.app.llm.LlmEvent
 import com.edo.app.llm.OpenAIClient
 import com.edo.app.llm.Role
 import kotlinx.coroutines.CompletableDeferred
@@ -242,7 +244,9 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         agentJob = container.appScope.launch {
             // Create thread if none active
             var threadId = container.activeThreadId.value
+            var needsSmartTitle = false
             if (threadId <= 0) {
+                needsSmartTitle = true
                 val newTitle = text.ifBlank { "Image message" }.take(48)
                 val now = System.currentTimeMillis()
                 threadId = container.db.threads().insert(
@@ -269,6 +273,10 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 it.copy(messages = it.messages + UiMessage(rowId, Role.User, blocks))
             }
             runAgent(threadId)
+            if (needsSmartTitle && _state.value.error == null) {
+                val titledThread = threadId
+                container.appScope.launch { generateTitle(titledThread) }
+            }
 
             // Process any queued message after agent completes
             while (true) {
@@ -299,6 +307,50 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
     }
 
     fun dismissError() = _state.update { it.copy(error = null) }
+
+    private fun buildLlm(settings: AppSettings): LlmClient = when (settings.provider) {
+        Provider.Anthropic -> AnthropicClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
+        Provider.OpenAI -> OpenAIClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
+    }
+
+    /**
+     * Replace the placeholder title (first message, truncated) with a short model-written
+     * one. Best-effort: any failure just leaves the placeholder in place.
+     */
+    private suspend fun generateTitle(threadId: Long) {
+        val settings = container.settings.load()
+        if (settings.apiKey.isBlank()) return
+        fun firstText(role: Role) = conversation.firstOrNull { it.role == role }
+            ?.blocks?.filterIsInstance<Block.Text>()?.joinToString("\n") { it.text }?.take(600).orEmpty()
+        val user = firstText(Role.User)
+        if (user.isBlank()) return
+        val prompt = "User: $user\n\nAssistant: ${firstText(Role.Assistant)}"
+        val title = try {
+            val sb = StringBuilder()
+            buildLlm(settings).stream(
+                "You name chat conversations. Reply with only a short title of 2 to 5 words, " +
+                    "no quotes, no trailing punctuation.",
+                listOf(ConvMessage(Role.User, listOf(Block.Text(prompt)))),
+                emptyList(),
+            ).collect { ev ->
+                when (ev) {
+                    is LlmEvent.TextDelta -> sb.append(ev.text)
+                    is LlmEvent.Failure -> return@collect
+                    else -> Unit
+                }
+            }
+            sb.toString().lineSequence().firstOrNull().orEmpty()
+                .trim().trim('"', '\'', '`', '*', '.').take(60)
+        } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) throw t
+            return
+        }
+        if (title.isBlank()) return
+        container.db.threads().updateTitleAndTimestamp(threadId, title, System.currentTimeMillis())
+        if (_state.value.currentThread?.id == threadId) {
+            _state.update { it.copy(currentThread = container.db.threads().getById(threadId)) }
+        }
+    }
 
     private suspend fun runAgent(threadId: Long) {
         val projectId = container.activeProjectId.value.takeIf { it > 0 } ?: run {
@@ -345,10 +397,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 RunLuaTool(),
             )
         )
-        val llm: LlmClient = when (settings.provider) {
-            Provider.Anthropic -> AnthropicClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
-            Provider.OpenAI -> OpenAIClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
-        }
+        val llm = buildLlm(settings)
         val yolo = project.yoloMode
         val gate = ApprovalGate { name, argsJson ->
             if (yolo) {
