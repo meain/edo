@@ -75,14 +75,20 @@ class MainActivity : ComponentActivity() {
                             nav.navigate("share") { launchSingleTop = true }
                         }
                     }
+                    // Screens' back/select handlers can fire twice (double tap, or a tap while the
+                    // exit transition is still showing). An unguarded second pop removes the start
+                    // destination and leaves NavHost empty — a blank screen until the app restarts.
+                    val popBack: () -> Unit = { if (nav.previousBackStackEntry != null) nav.popBackStack() }
+                    // Likewise a double tap on a menu button must not push the same screen twice.
+                    val open: (String) -> Unit = { route -> nav.navigate(route) { launchSingleTop = true } }
                     NavHost(navController = nav, startDestination = "chat") {
                         composable("share") {
                             ShareScreen(
                                 container = container,
-                                onOpenProjects = { nav.navigate("projects") },
+                                onOpenProjects = { open("projects") },
                                 onCancel = {
                                     container.clearShare()
-                                    nav.popBackStack()
+                                    popBack()
                                 },
                                 onDone = { nav.popBackStack("chat", inclusive = false) },
                             )
@@ -90,32 +96,23 @@ class MainActivity : ComponentActivity() {
                         composable("chat") {
                             ChatScreen(
                                 container = container,
-                                onOpenSettings = { nav.navigate("settings") },
-                                onOpenProjects = { nav.navigate("projects") },
-                                onOpenThreads = { nav.navigate("threads") },
-                                onOpenFiles = { nav.navigate("files") },
+                                onOpenSettings = { open("settings") },
+                                onOpenProjects = { open("projects") },
+                                onOpenThreads = { open("threads") },
+                                onOpenFiles = { open("files") },
                             )
                         }
                         composable("projects") {
-                            ProjectsScreen(
-                                container = container,
-                                onBack = { nav.popBackStack() },
-                            )
+                            ProjectsScreen(container = container, onBack = popBack)
                         }
                         composable("threads") {
-                            ThreadsScreen(
-                                container = container,
-                                onBack = { nav.popBackStack() },
-                            )
+                            ThreadsScreen(container = container, onBack = popBack)
                         }
                         composable("files") {
-                            FilesScreen(
-                                container = container,
-                                onBack = { nav.popBackStack() },
-                            )
+                            FilesScreen(container = container, onBack = popBack)
                         }
                         composable("settings") {
-                            SettingsScreen(container = container, onBack = { nav.popBackStack() })
+                            SettingsScreen(container = container, onBack = popBack)
                         }
                     }
                 }
