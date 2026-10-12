@@ -159,6 +159,7 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
                 Button(
                     onClick = {
                         scope.launch {
+                            container.chatSessions.discard(thread.id)
                             container.db.messages().clearThread(thread.id)
                             container.db.threads().delete(thread)
                             if (activeThreadId == thread.id) container.setActiveThread(-1L)

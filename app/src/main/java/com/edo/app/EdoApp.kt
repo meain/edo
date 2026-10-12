@@ -5,6 +5,7 @@ import android.net.Uri
 import com.edo.app.data.ChatDatabase
 import com.edo.app.data.EncryptedSettingsStore
 import com.edo.app.data.SettingsStore
+import com.edo.app.ui.chat.ChatSessions
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -16,7 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-class AppContainer(app: Application) {
+class AppContainer(private val app: Application) {
     val settings: SettingsStore = EncryptedSettingsStore(app)
     val db: ChatDatabase = ChatDatabase.get(app)
     val http: HttpClient = HttpClient(CIO) {
@@ -28,6 +29,9 @@ class AppContainer(app: Application) {
      *  ViewModel teardown (e.g., navigating away within the app or brief
      *  configuration churn). It outlives any individual screen. */
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** Per-chat conversations and agent runs; they outlive the screen and the active chat. */
+    val chatSessions: ChatSessions = ChatSessions(app, this)
 
     private val _activeProjectId = MutableStateFlow(settings.load().activeProjectId)
     val activeProjectId: StateFlow<Long> = _activeProjectId.asStateFlow()
