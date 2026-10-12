@@ -124,6 +124,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -285,6 +294,45 @@ fun ChatScreen(
         }
     }
     LaunchedEffect(state.currentThread?.id) { followTail = true }
+
+    // Pulling up past the very end of the conversation suggests (and, on release, starts) a new chat.
+    val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val newChatPullPx = with(density) { 80.dp.toPx() }
+    var pull by remember { mutableFloatStateOf(0f) }
+    val pullConnection = remember(listState, state.running) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                // Finger moving back down retracts the pull before the list scrolls.
+                if (pull > 0f && available.y > 0f) {
+                    val used = minOf(pull, available.y)
+                    pull -= used
+                    return Offset(0f, used)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput || state.running) return Offset.Zero
+                if (available.y < 0f && !listState.canScrollForward) {
+                    val before = pull
+                    pull = (pull - available.y).coerceAtMost(newChatPullPx * 1.5f)
+                    if (before < newChatPullPx && pull >= newChatPullPx) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    }
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                val trigger = pull >= newChatPullPx
+                pull = 0f
+                if (trigger) vm.newChat()
+                return Velocity.Zero
+            }
+        }
+    }
 
     // Index tool results by their tool_use id so completed assistant cards can
     // display the result inline. Tool result blocks live on subsequent user
@@ -456,7 +504,10 @@ fun ChatScreen(
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .nestedScroll(pullConnection)
+                            .graphicsLayer { translationY = -pull * 0.4f },
                         state = listState,
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
                             horizontal = 12.dp,
@@ -509,7 +560,29 @@ fun ChatScreen(
                             }
                         }
                     }
-                    if (!followTail) {
+                    if (pull > 0f) {
+                        val ready = pull >= newChatPullPx
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.extraLarge,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 12.dp)
+                                .graphicsLayer { alpha = (pull / newChatPullPx).coerceIn(0f, 1f) },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (ready) "Release to start a new chat" else "Keep pulling for a new chat",
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                        }
+                    } else if (!followTail) {
                         SmallFloatingActionButton(
                             onClick = {
                                 followTail = true
