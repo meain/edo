@@ -25,6 +25,7 @@ import com.edo.app.agent.RunLuaTool
 import com.edo.app.agent.FileWorkspace
 import com.edo.app.agent.SafWorkspace
 import com.edo.app.agent.ToolRegistry
+import com.edo.app.agent.WebSearchTool
 import com.edo.app.agent.WriteFileTool
 import com.edo.app.agent.AgentEvent
 import com.edo.app.agent.buildSystemPrompt
@@ -336,6 +337,7 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 LsTool(ws),
                 GrepTool(ws),
                 HttpRequestTool(KtorHttpFetcher(container.http)),
+                WebSearchTool(KtorHttpFetcher(container.http)),
                 DateTimeTool(),
                 CalculatorTool(),
                 LoadSkillTool(ws),

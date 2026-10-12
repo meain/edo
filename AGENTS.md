@@ -19,7 +19,7 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 
 ## Tools
 
-12 tools total, all scoped to the project workspace:
+13 tools total, all scoped to the project workspace:
 
 | Tool | Description |
 |------|-------------|
@@ -31,6 +31,7 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 | `ls` | List directory contents with sizes |
 | `grep` | Regex search across text files (max 500 matches) |
 | `http_request` | Make HTTP requests (any method, custom headers) |
+| `web_search` | DuckDuckGo Lite search (lynx user agent) returning titles, URLs, snippets |
 | `current_datetime` | Current date/time with zone, epoch, week info |
 | `ask_user` | Ask the user a question with predefined options or freetext |
 | `calculator` | Evaluate math expressions (supports +, -, *, /, ^, sqrt, sin, cos, tan, log, ln, exp, etc.) |
