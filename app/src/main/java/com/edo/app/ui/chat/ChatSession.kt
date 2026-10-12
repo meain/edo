@@ -30,6 +30,7 @@ import com.edo.app.data.AppSettings
 import com.edo.app.data.ProjectEntity
 import com.edo.app.data.Provider
 import com.edo.app.data.ThreadEntity
+import com.edo.app.data.withOverrides
 import com.edo.app.llm.AnthropicClient
 import com.edo.app.llm.Block
 import com.edo.app.llm.ConvMessage
@@ -298,7 +299,7 @@ class ChatSession internal constructor(
             _state.update { it.copy(error = "Project not found.") }
             return
         }
-        val settings = container.settings.load()
+        val settings = container.settings.load().withOverrides(project)
         if (settings.apiKey.isBlank()) {
             _state.update { it.copy(error = "Add your API key in Settings.") }
             return

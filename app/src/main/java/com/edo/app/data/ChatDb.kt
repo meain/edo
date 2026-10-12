@@ -24,6 +24,9 @@ data class ProjectEntity(
     @ColumnInfo(name = "workspace_uri") val workspaceUri: String,
     @ColumnInfo(name = "description", defaultValue = "") val description: String = "",
     @ColumnInfo(name = "yolo_mode", defaultValue = "0") val yoloMode: Boolean = false,
+    /** Null means "use the global setting". */
+    @ColumnInfo(name = "model_override") val modelOverride: String? = null,
+    @ColumnInfo(name = "max_turns_override") val maxTurnsOverride: Int? = null,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
 )
 
@@ -113,7 +116,7 @@ interface MessageDao {
 
 @Database(
     entities = [ProjectEntity::class, ThreadEntity::class, MessageEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -132,13 +135,21 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v4 → v5: per-project model and max-turns overrides. */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE projects ADD COLUMN model_override TEXT")
+                db.execSQL("ALTER TABLE projects ADD COLUMN max_turns_override INTEGER")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }

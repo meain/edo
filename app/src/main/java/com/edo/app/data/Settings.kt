@@ -27,6 +27,12 @@ data class AppSettings(
     val maxTurns: Int = 50,
 )
 
+/** Global settings with the project's model / max-turns overrides applied, if any. */
+fun AppSettings.withOverrides(project: ProjectEntity): AppSettings = copy(
+    model = project.modelOverride?.takeIf { it.isNotBlank() } ?: model,
+    maxTurns = project.maxTurnsOverride?.takeIf { it > 0 } ?: maxTurns,
+)
+
 interface SettingsStore {
     fun load(): AppSettings
     fun save(settings: AppSettings)

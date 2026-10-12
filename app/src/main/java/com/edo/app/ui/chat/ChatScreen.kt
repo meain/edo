@@ -110,6 +110,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.SmallFloatingActionButton
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
@@ -516,6 +517,7 @@ fun ChatScreen(
                             },
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                             contentColor = MaterialTheme.colorScheme.onSurface,
+                            elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp),
                             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
                         ) {
                             Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Jump to latest")
