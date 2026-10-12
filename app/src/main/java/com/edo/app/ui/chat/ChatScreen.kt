@@ -102,6 +102,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.interaction.DragInteraction
@@ -186,7 +191,20 @@ fun ChatScreen(
         factory = chatVmFactory(container, context.applicationContext as EdoApp)
     )
     val state by vm.state.collectAsState()
-    var input by remember { mutableStateOf("") }
+    // The field is backed by a TextFieldValue so programmatic edits (skill picker, shared
+    // text) can put the cursor at the end; `input` is the plain-string view of it.
+    val inputField = remember { mutableStateOf(TextFieldValue("")) }
+    val input = inputField.value.text
+    fun setInput(value: String) {
+        if (value != inputField.value.text) inputField.value = TextFieldValue(value, TextRange(value.length))
+    }
+
+    // Typing "/" as the first character (no spaces yet) opens the skill picker.
+    val skills by vm.skills.collectAsState()
+    val slashQuery = input.takeIf { it.startsWith("/") && it.none { c -> c.isWhitespace() } }?.drop(1)
+    LaunchedEffect(slashQuery != null) { if (slashQuery != null) vm.refreshSkills() }
+    val slashMatches = if (slashQuery == null) emptyList()
+    else skills.filter { it.name.contains(slashQuery, ignoreCase = true) }
     var pendingImages by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var pendingTextFile by remember { mutableStateOf<Pair<String, String>?>(null) }
     val expandedToolIds = remember { mutableStateMapOf<String, Boolean>() }
@@ -213,7 +231,10 @@ fun ChatScreen(
     val share by container.pendingShare.collectAsState()
     LaunchedEffect(share?.id, share?.confirmed) {
         val s = share?.takeIf { it.confirmed } ?: return@LaunchedEffect
-        if (s.text.isNotBlank()) input = if (input.isBlank()) s.text else input + "\n" + s.text
+        if (s.text.isNotBlank()) {
+            val current = inputField.value.text
+            setInput(if (current.isBlank()) s.text else current + "\n" + s.text)
+        }
         var anyUnsupported = false
         for (uri in s.uris) {
             val attachment = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -513,6 +534,37 @@ fun ChatScreen(
                         )
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
+                    if (slashMatches.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp).heightIn(max = 240.dp),
+                        ) {
+                            Column(Modifier.verticalScroll(rememberScrollState())) {
+                                for (skill in slashMatches) {
+                                    Column(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable { setInput("/${skill.name} ") }
+                                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    ) {
+                                        Text(
+                                            "/${skill.name}",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                        Text(
+                                            skill.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                     state.queuedMessages.forEachIndexed { index, queued ->
                         Surface(
                             color = MaterialTheme.colorScheme.secondaryContainer,
@@ -595,8 +647,8 @@ fun ChatScreen(
                             )
                         }
                         TextField(
-                            value = input,
-                            onValueChange = { input = it },
+                            value = inputField.value,
+                            onValueChange = { inputField.value = it },
                             modifier = Modifier.weight(1f),
                             placeholder = { Text("Message…") },
                             maxLines = 6,
@@ -622,7 +674,7 @@ fun ChatScreen(
                             IconButton(
                                 onClick = {
                                     vm.queueMessage(composed.trim(), pendingImages)
-                                    input = ""
+                                    setInput("")
                                     pendingImages = emptyList()
                                     pendingTextFile = null
                                 },
@@ -654,7 +706,7 @@ fun ChatScreen(
                                         } else {
                                             followTail = true
                                             vm.sendUserMessage(composed.trim(), pendingImages)
-                                            input = ""
+                                            setInput("")
                                             pendingImages = emptyList()
                                             pendingTextFile = null
                                         }

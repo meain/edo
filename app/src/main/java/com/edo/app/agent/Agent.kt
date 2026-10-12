@@ -187,7 +187,8 @@ class Agent(
         const val DefaultSystemPrompt = """You are Edo, an assistant running on Android. Use the tools to answer the user's question. Be concise.
 
 The workspace root may contain an AGENTS.md with project-specific instructions — if present below, follow them.
-Skills are reusable playbooks; call load_skill with the skill name when a task matches."""
+Skills are reusable playbooks; call load_skill with the skill name when a task matches.
+If the user's message starts with /<skill-name>, the user is explicitly selecting that skill: call load_skill with that name first and follow it for the rest of the message."""
         const val MAX_LLM_RETRIES = 5
     }
 }
