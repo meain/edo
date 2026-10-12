@@ -563,41 +563,44 @@ fun ChatScreen(
                                 )
                             }
                         } else {
-                            IconButton(
-                                enabled = if (state.running) true else !state.needsProject && hasContent,
-                                onClick = {
-                                    if (state.running) {
-                                        vm.cancelAgent()
-                                    } else {
-                                        vm.sendUserMessage(composed.trim(), pendingImages)
-                                        input = ""
-                                        pendingImages = emptyList()
-                                        pendingTextFile = null
-                                    }
-                                },
+                            // Plain Box instead of IconButton: IconButton enforces a 48dp minimum
+                            // touch size, which made the circle overshoot the pill.
+                            val canSend = !state.needsProject && hasContent
+                            Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .padding(start = 4.dp, end = 8.dp, bottom = 8.dp)
-                                    .size(36.dp)
+                                    .size(40.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
                                     .background(
-                                        if (state.running || (!state.needsProject && hasContent))
-                                            MaterialTheme.colorScheme.primary
+                                        if (state.running || canSend) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.outlineVariant,
-                                        androidx.compose.foundation.shape.CircleShape,
-                                    ),
+                                    )
+                                    .clickable(enabled = state.running || canSend) {
+                                        if (state.running) {
+                                            vm.cancelAgent()
+                                        } else {
+                                            vm.sendUserMessage(composed.trim(), pendingImages)
+                                            input = ""
+                                            pendingImages = emptyList()
+                                            pendingTextFile = null
+                                        }
+                                    },
                             ) {
                                 if (state.running) {
                                     Icon(
                                         Icons.Filled.Stop,
                                         contentDescription = "Stop",
                                         tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(20.dp),
                                     )
                                 } else {
                                     Icon(
                                         Icons.AutoMirrored.Filled.Send,
                                         contentDescription = "Send",
-                                        tint = if (!state.needsProject && hasContent)
-                                            MaterialTheme.colorScheme.onPrimary
+                                        tint = if (canSend) MaterialTheme.colorScheme.onPrimary
                                         else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp),
                                     )
                                 }
                             }
