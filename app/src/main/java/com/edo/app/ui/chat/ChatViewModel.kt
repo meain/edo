@@ -43,6 +43,8 @@ import com.edo.app.llm.OpenAIClient
 import com.edo.app.llm.Role
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -278,24 +280,76 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
                 container.appScope.launch { generateTitle(titledThread) }
             }
 
-            // Process any queued message after agent completes
-            while (true) {
-                val queued = _state.value.queuedMessages.firstOrNull() ?: break
-                _state.update { it.copy(queuedMessages = it.queuedMessages.drop(1)) }
-                val queuedBlocks = buildList {
-                    for (img in queued.images) add(Block.Image(img.first, img.second))
-                    if (queued.text.isNotBlank()) add(Block.Text(queued.text))
-                }
-                if (queuedBlocks.isEmpty()) break
-                val currentThreadId = container.activeThreadId.value.takeIf { it > 0 } ?: break
-                val queuedMsg = ConvMessage(Role.User, queuedBlocks)
-                conversation.add(queuedMsg)
-                val queuedRowId = container.db.messages().insert(uiToRow(queuedMsg, currentThreadId))
-                persistedCount = conversation.size
-                _state.update { it.copy(messages = it.messages + UiMessage(queuedRowId, Role.User, queuedBlocks)) }
-                runAgent(currentThreadId)
-            }
+            drainQueue()
         }
+    }
+
+    /** Send queued messages one after another once the current agent run completes. */
+    private suspend fun drainQueue() {
+        while (true) {
+            // runAgent swallows cancellation; don't pop a queued message if we were cancelled.
+            kotlin.coroutines.coroutineContext.ensureActive()
+            val queued = _state.value.queuedMessages.firstOrNull() ?: break
+            _state.update { it.copy(queuedMessages = it.queuedMessages.drop(1)) }
+            val currentThreadId = container.activeThreadId.value.takeIf { it > 0 } ?: break
+            if (!deliverUserMessage(currentThreadId, queued)) break
+            runAgent(currentThreadId)
+        }
+    }
+
+    /** Append [queued] to the conversation and persist it. Returns false if it was empty. */
+    private suspend fun deliverUserMessage(threadId: Long, queued: QueuedMessage): Boolean {
+        val blocks = buildList {
+            for (img in queued.images) add(Block.Image(img.first, img.second))
+            if (queued.text.isNotBlank()) add(Block.Text(queued.text))
+        }
+        if (blocks.isEmpty()) return false
+        val msg = ConvMessage(Role.User, blocks)
+        conversation.add(msg)
+        val rowId = container.db.messages().insert(uiToRow(msg, threadId))
+        persistedCount = conversation.size
+        _state.update { it.copy(messages = it.messages + UiMessage(rowId, Role.User, blocks), scrollVersion = it.scrollVersion + 1) }
+        return true
+    }
+
+    /**
+     * Interrupt the current run right now and send the queued message at [index] in its place,
+     * instead of waiting for the run to finish.
+     */
+    fun sendQueuedNow(index: Int) {
+        val queued = _state.value.queuedMessages.getOrNull(index) ?: return
+        _state.update { it.copy(queuedMessages = it.queuedMessages.toMutableList().apply { removeAt(index) }) }
+        val previous = agentJob
+        agentJob = container.appScope.launch {
+            // Wait for the old run to stop touching `conversation` before editing it.
+            previous?.cancelAndJoin()
+            val threadId = container.activeThreadId.value.takeIf { it > 0 } ?: return@launch
+            // The cancelled run may have added messages it hadn't persisted yet.
+            persistNewMessages(threadId)
+            closeOrphanedToolCalls(threadId)
+            if (!deliverUserMessage(threadId, queued)) return@launch
+            runAgent(threadId)
+            drainQueue()
+        }
+    }
+
+    /**
+     * If the run was interrupted mid-tool, the last assistant message has tool calls with no
+     * results, which the API rejects. Give each an "interrupted" result so history stays valid.
+     */
+    private suspend fun closeOrphanedToolCalls(threadId: Long) {
+        val last = conversation.lastOrNull()?.takeIf { it.role == Role.Assistant } ?: return
+        val orphaned = last.blocks.filterIsInstance<Block.ToolUse>()
+        if (orphaned.isEmpty()) return
+        conversation.add(
+            ConvMessage(
+                Role.User,
+                orphaned.map {
+                    Block.ToolResult(it.id, "Interrupted: the user sent a new message before this finished; it may not have completed.", true)
+                },
+            )
+        )
+        persistNewMessages(threadId)
     }
 
     fun approve(decision: ApprovalDecision) {
@@ -321,10 +375,15 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         val settings = container.settings.load()
         if (settings.apiKey.isBlank()) return
         fun firstText(role: Role) = conversation.firstOrNull { it.role == role }
-            ?.blocks?.filterIsInstance<Block.Text>()?.joinToString("\n") { it.text }?.take(600).orEmpty()
-        val user = firstText(Role.User)
+            ?.blocks?.filterIsInstance<Block.Text>()?.joinToString("\n") { it.text }.orEmpty()
+        // Don't feed whole attached files to the titler; mention their names instead.
+        val (files, userText) = splitAttachedFiles(firstText(Role.User))
+        val user = buildString {
+            append(userText.take(600))
+            if (files.isNotEmpty()) append("\n[attached: ${files.joinToString { it.name }}]")
+        }.trim()
         if (user.isBlank()) return
-        val prompt = "User: $user\n\nAssistant: ${firstText(Role.Assistant)}"
+        val prompt = "User: $user\n\nAssistant: ${firstText(Role.Assistant).take(600)}"
         val title = try {
             val sb = StringBuilder()
             buildLlm(settings).stream(

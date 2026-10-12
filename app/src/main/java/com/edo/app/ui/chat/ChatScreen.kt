@@ -194,6 +194,29 @@ fun ChatScreen(
             .show()
     }
 
+    // Content shared into Edo from another app: once a project/chat has been chosen,
+    // drop it into the input box (text) and attachment chips (files) for review.
+    val share by container.pendingShare.collectAsState()
+    LaunchedEffect(share?.id, share?.confirmed) {
+        val s = share?.takeIf { it.confirmed } ?: return@LaunchedEffect
+        if (s.text.isNotBlank()) input = if (input.isBlank()) s.text else input + "\n" + s.text
+        var anyUnsupported = false
+        for (uri in s.uris) {
+            val attachment = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { readAttachment(context.contentResolver, uri) }.getOrNull()
+            }
+            when (attachment) {
+                is Attachment.Image -> pendingImages = pendingImages + (attachment.mediaType to attachment.base64)
+                is Attachment.Text -> pendingTextFile = attachment.name to attachment.content
+                null -> anyUnsupported = true
+            }
+        }
+        container.clearShare()
+        if (anyUnsupported) android.widget.Toast
+            .makeText(context, "Some shared files were unsupported", android.widget.Toast.LENGTH_SHORT)
+            .show()
+    }
+
     // Camera capture: write to a cacheDir file via FileProvider, then read it
     // back as base64 once the camera app reports success.
     var pendingCaptureUri by remember { mutableStateOf<Uri?>(null) }
@@ -466,6 +489,13 @@ fun ChatScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 TextButton(
+                                    onClick = { vm.sendQueuedNow(index) },
+                                    modifier = Modifier.height(24.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                ) {
+                                    Text("Send now", style = MaterialTheme.typography.labelSmall)
+                                }
+                                TextButton(
                                     onClick = { vm.cancelQueue(index) },
                                     modifier = Modifier.height(24.dp),
                                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
@@ -540,8 +570,7 @@ fun ChatScreen(
                         val hasContent = input.isNotBlank() || pendingImages.isNotEmpty() || pendingTextFile != null
                         val composed = buildString {
                             pendingTextFile?.let { (filename, content) ->
-                                append("Attached file `").append(filename).append("`:\n")
-                                append("```\n").append(content).append("\n```\n\n")
+                                append(attachedFileBlock(filename, content))
                             }
                             append(input.trim())
                         }
@@ -901,7 +930,7 @@ private fun MessageBubble(
             val textBlocks = msg.blocks.filterIsInstance<Block.Text>()
             val imageBlocks = msg.blocks.filterIsInstance<Block.Image>()
             if (textBlocks.isEmpty() && imageBlocks.isEmpty()) return
-            val text = textBlocks.joinToString("\n") { it.text }.trim()
+            val (attachedFiles, text) = splitAttachedFiles(textBlocks.joinToString("\n") { it.text })
             Row(Modifier.fillMaxWidth()) {
                 Spacer(Modifier.weight(1f))
                 Column(
@@ -925,6 +954,39 @@ private fun MessageBubble(
                                     .clickable { onImageClick(bitmap) },
                                 contentScale = ContentScale.FillWidth,
                             )
+                        }
+                    }
+                    for (file in attachedFiles) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.InsertDriveFile,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        file.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 220.dp),
+                                    )
+                                    Text(
+                                        "${file.chars} chars",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                                    )
+                                }
+                            }
                         }
                     }
                     if (text.isNotEmpty()) {

@@ -1,6 +1,7 @@
 package com.edo.app
 
 import android.app.Application
+import android.net.Uri
 import com.edo.app.data.ChatDatabase
 import com.edo.app.data.EncryptedSettingsStore
 import com.edo.app.data.SettingsStore
@@ -13,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 class AppContainer(app: Application) {
     val settings: SettingsStore = EncryptedSettingsStore(app)
@@ -46,7 +48,30 @@ class AppContainer(app: Application) {
         _activeThreadId.value = id
         settings.save(settings.load().copy(activeThreadId = id))
     }
+
+    private val _pendingShare = MutableStateFlow<SharedContent?>(null)
+    /** Content received via the system share sheet, until the chat screen consumes it. */
+    val pendingShare: StateFlow<SharedContent?> = _pendingShare.asStateFlow()
+
+    fun offerShare(text: String, uris: List<Uri>) {
+        _pendingShare.value = SharedContent(System.nanoTime(), text, uris)
+    }
+
+    /** The user picked a destination; the chat screen should now apply the content. */
+    fun confirmShare() = _pendingShare.update { it?.copy(confirmed = true) }
+
+    fun clearShare() {
+        _pendingShare.value = null
+    }
 }
+
+/** Shared text and/or file URIs. [confirmed] flips once a project and chat have been chosen. */
+data class SharedContent(
+    val id: Long,
+    val text: String,
+    val uris: List<Uri>,
+    val confirmed: Boolean = false,
+)
 
 class EdoApp : Application() {
     lateinit var container: AppContainer
