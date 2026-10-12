@@ -3,6 +3,7 @@ package com.edo.app.ui.files
 import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -107,6 +108,12 @@ fun FilesScreen(container: AppContainer, onBack: () -> Unit) {
     }
 
     val title = if (currentPath.isBlank()) projectName ?: "Files" else currentPath
+    // System back steps out of a preview / up a folder; at the root it falls through to the
+    // panel container, which closes the browser.
+    BackHandler(enabled = viewing != null || currentPath.isNotBlank()) {
+        if (viewing != null) viewing = null
+        else currentPath = currentPath.substringBeforeLast('/', "")
+    }
     Scaffold(
         topBar = {
             TopAppBar(
