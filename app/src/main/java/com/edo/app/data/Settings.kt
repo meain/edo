@@ -24,6 +24,7 @@ data class AppSettings(
     val model: String = "claude-3-5-sonnet-latest",
     val activeProjectId: Long = -1L,
     val activeThreadId: Long = -1L,
+    val maxTurns: Int = 50,
 )
 
 interface SettingsStore {
@@ -53,6 +54,7 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
         model = prefs.getString(KEY_MODEL, "claude-3-5-sonnet-latest") ?: "",
         activeProjectId = prefs.getLong(KEY_ACTIVE_PROJECT_ID, -1L),
         activeThreadId = prefs.getLong(KEY_ACTIVE_THREAD_ID, -1L),
+        maxTurns = prefs.getInt(KEY_MAX_TURNS, 50),
     )
 
     override fun save(settings: AppSettings) {
@@ -63,6 +65,7 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
             .putString(KEY_MODEL, settings.model)
             .putLong(KEY_ACTIVE_PROJECT_ID, settings.activeProjectId)
             .putLong(KEY_ACTIVE_THREAD_ID, settings.activeThreadId)
+            .putInt(KEY_MAX_TURNS, settings.maxTurns)
             .apply()
     }
 
@@ -73,6 +76,7 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
         const val KEY_MODEL = "model"
         const val KEY_ACTIVE_PROJECT_ID = "active_project_id"
         const val KEY_ACTIVE_THREAD_ID = "active_thread_id"
+        const val KEY_MAX_TURNS = "max_turns"
     }
 }
 

@@ -49,7 +49,7 @@ class Agent(
     private val tools: ToolRegistry,
     private val gate: ApprovalGate,
     private val systemPrompt: String? = DefaultSystemPrompt,
-    private val maxTurns: Int = 20,
+    private val maxTurns: Int = 50,
 ) {
 
     private val sessionAllowed = mutableSetOf<String>()

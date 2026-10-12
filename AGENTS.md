@@ -39,7 +39,7 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 
 ## Agent loop
 
-- Max 20 turns per conversation
+- Max turns per run (Settings, default 50)
 - Up to 5 retries on failure with exponential backoff (2 s, 4 s, 8 s, 15 s)
 - System prompt is dynamically augmented with `AGENTS.md` from workspace root + discovered skills
 - `ApprovalGate` prompts the user for each tool call unless yolo mode is on; once approved, that tool auto-approves for the rest of the session

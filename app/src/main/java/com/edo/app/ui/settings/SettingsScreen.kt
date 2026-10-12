@@ -30,6 +30,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.edo.app.AppContainer
@@ -74,6 +76,7 @@ private suspend fun testConnection(container: AppContainer, s: AppSettings): Pai
 @Composable
 fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
     var current by remember { mutableStateOf(container.settings.load()) }
+    var maxTurnsText by remember { mutableStateOf(current.maxTurns.toString()) }
     var testing by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     val scope = rememberCoroutineScope()
@@ -147,6 +150,19 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = maxTurnsText,
+                onValueChange = { text ->
+                    val digits = text.filter { it.isDigit() }.take(4)
+                    maxTurnsText = digits
+                    digits.toIntOrNull()?.takeIf { it > 0 }?.let { current = current.copy(maxTurns = it) }
+                },
+                label = { Text("Max turns per run") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
             Spacer(Modifier.height(12.dp))
             OutlinedButton(
                 onClick = {
@@ -176,6 +192,7 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = {
                     current = AppSettings(activeProjectId = current.activeProjectId)
+                    maxTurnsText = current.maxTurns.toString()
                 }) { Text("Reset") }
             }
         }

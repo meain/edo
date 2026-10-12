@@ -347,7 +347,7 @@ class ChatSession internal constructor(
         val systemPrompt = buildSystemPrompt(ws)
         _state.update { it.copy(running = true, error = null) }
         try {
-            Agent(llm, tools, gate, systemPrompt = systemPrompt).run(conversation).collect { ev -> handle(ev) }
+            Agent(llm, tools, gate, systemPrompt = systemPrompt, maxTurns = settings.maxTurns).run(conversation).collect { ev -> handle(ev) }
         } catch (t: Throwable) {
             if (t !is CancellationException) {
                 _state.update { it.copy(error = t.message ?: "Unknown error") }
