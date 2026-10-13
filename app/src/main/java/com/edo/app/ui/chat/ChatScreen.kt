@@ -300,15 +300,18 @@ fun ChatScreen(
     // Pulling up past the very end of the conversation suggests (and, on release, starts) a new chat.
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
-    val newChatPullPx = with(density) { 80.dp.toPx() }
+    // `pull` is the resisted distance: the finger travels twice as far as the pull grows, so a
+    // casual overscroll at the bottom never reaches the threshold (~200 dp of drag to trigger).
+    val newChatPullPx = with(density) { 100.dp.toPx() }
+    val pullResistance = 0.5f
     var pull by remember { mutableFloatStateOf(0f) }
     val pullConnection = remember(listState, state.running) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 // Finger moving back down retracts the pull before the list scrolls.
                 if (pull > 0f && available.y > 0f) {
-                    val used = minOf(pull, available.y)
-                    pull -= used
+                    val used = minOf(pull / pullResistance, available.y)
+                    pull -= used * pullResistance
                     return Offset(0f, used)
                 }
                 return Offset.Zero
@@ -318,7 +321,7 @@ fun ChatScreen(
                 if (source != NestedScrollSource.UserInput || state.running) return Offset.Zero
                 if (available.y < 0f && !listState.canScrollForward) {
                     val before = pull
-                    pull = (pull - available.y).coerceAtMost(newChatPullPx * 1.5f)
+                    pull = (pull - available.y * pullResistance).coerceAtMost(newChatPullPx * 1.5f)
                     if (before < newChatPullPx && pull >= newChatPullPx) {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     }
@@ -514,7 +517,7 @@ fun ChatScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .nestedScroll(pullConnection)
-                            .graphicsLayer { translationY = -pull * 0.4f },
+                            .graphicsLayer { translationY = -pull * 0.5f },
                         state = listState,
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
                             horizontal = 12.dp,
@@ -567,7 +570,8 @@ fun ChatScreen(
                             }
                         }
                     }
-                    if (pull > 0f) {
+                    // No hint for the first fifth of the pull, so a small overscroll stays invisible.
+                    if (pull > newChatPullPx * 0.2f) {
                         val ready = pull >= newChatPullPx
                         Surface(
                             color = MaterialTheme.colorScheme.secondaryContainer,
