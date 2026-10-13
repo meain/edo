@@ -15,7 +15,7 @@ Claude-Code-style agent app for Android. Kotlin + Jetpack Compose, Material 3 wi
   - `ui/threads/` — per-project chat list, shown as the left panel of the chat screen
   - `ui/files/` — workspace file browser, shown as the right panel; Markdown preview and long-press actions
   - `ui/schedules/` — per-project schedule list + editor, with Run now
-  - `ui/settings/` — provider/key/model
+  - `ui/settings/` — provider/key/model, plus an optional weak model for side tasks like chat titles (`AppSettings.forSideTasks`, blank falls back to the main model)
 - `MainActivity.kt` — single activity, edge-to-edge, NavHost with `chat` (hosts the swipe panels), `projects` (dialog), `schedules`, `settings`, `share` destinations
 
 Threads are scoped to projects, messages to threads. `AppSettings.activeProjectId`/`activeThreadId` persist the current selection. Switching projects clears the active thread.

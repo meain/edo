@@ -25,7 +25,13 @@ data class AppSettings(
     val activeProjectId: Long = -1L,
     val activeThreadId: Long = -1L,
     val maxTurns: Int = 50,
+    /** Cheaper model for side tasks (chat titles); blank falls back to [model]. */
+    val weakModel: String = "",
 )
+
+/** Settings to use for side tasks such as naming a chat: the weak model if one is set. */
+fun AppSettings.forSideTasks(): AppSettings =
+    if (weakModel.isBlank()) this else copy(model = weakModel.trim())
 
 /** Global settings with the project's model / max-turns overrides applied, if any. */
 fun AppSettings.withOverrides(project: ProjectEntity): AppSettings = copy(
@@ -61,6 +67,7 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
         activeProjectId = prefs.getLong(KEY_ACTIVE_PROJECT_ID, -1L),
         activeThreadId = prefs.getLong(KEY_ACTIVE_THREAD_ID, -1L),
         maxTurns = prefs.getInt(KEY_MAX_TURNS, 50),
+        weakModel = prefs.getString(KEY_WEAK_MODEL, "") ?: "",
     )
 
     override fun save(settings: AppSettings) {
@@ -72,6 +79,7 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
             .putLong(KEY_ACTIVE_PROJECT_ID, settings.activeProjectId)
             .putLong(KEY_ACTIVE_THREAD_ID, settings.activeThreadId)
             .putInt(KEY_MAX_TURNS, settings.maxTurns)
+            .putString(KEY_WEAK_MODEL, settings.weakModel)
             .apply()
     }
 
@@ -83,6 +91,7 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
         const val KEY_ACTIVE_PROJECT_ID = "active_project_id"
         const val KEY_ACTIVE_THREAD_ID = "active_thread_id"
         const val KEY_MAX_TURNS = "max_turns"
+        const val KEY_WEAK_MODEL = "weak_model"
     }
 }
 

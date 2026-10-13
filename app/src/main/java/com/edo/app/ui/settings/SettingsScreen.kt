@@ -152,6 +152,16 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
+                value = current.weakModel,
+                onValueChange = { current = current.copy(weakModel = it) },
+                label = { Text("Weak model (optional)") },
+                placeholder = { Text(current.model) },
+                supportingText = { Text("Used for side tasks like naming chats. Blank uses the main model.") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
                 value = maxTurnsText,
                 onValueChange = { text ->
                     val digits = text.filter { it.isDigit() }.take(4)

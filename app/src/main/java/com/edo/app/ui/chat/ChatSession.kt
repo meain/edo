@@ -31,6 +31,7 @@ import com.edo.app.data.AppSettings
 import com.edo.app.data.ProjectEntity
 import com.edo.app.data.Provider
 import com.edo.app.data.ThreadEntity
+import com.edo.app.data.forSideTasks
 import com.edo.app.data.withOverrides
 import com.edo.app.llm.AnthropicClient
 import com.edo.app.llm.Block
@@ -272,7 +273,7 @@ class ChatSession internal constructor(
      * one. Best-effort: any failure just leaves the placeholder in place.
      */
     private suspend fun generateTitle() {
-        val settings = container.settings.load()
+        val settings = container.settings.load().forSideTasks()
         if (settings.apiKey.isBlank()) return
         val id = threadId
         fun firstText(role: Role) = conversation.firstOrNull { it.role == role }
