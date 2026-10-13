@@ -30,15 +30,16 @@ class ScheduleTool(
     override val spec = ToolSpec(
         name = "schedule",
         description = "Manage scheduled prompts that run in this project on their own and notify the user " +
-            "with the result. Actions: create, list, delete, enable, disable. A scheduled run is a fresh, " +
-            "unattended chat that gets `prompt` as its first message, so make the prompt self-contained. " +
-            "Times are the user's local time; call current_datetime first to resolve things like " +
-            "\"tomorrow at 9\". For create, `repeat` is one of: once (needs `date` and `time`), " +
-            "interval (needs `every_minutes`, at least $MIN_INTERVAL_MINUTES), daily (needs `time`), " +
-            "weekly (needs `days` and `time`).",
+            "with the result. Actions: create, list, get (full details of one), update, delete, enable, " +
+            "disable. A scheduled run is a fresh, unattended chat that gets `prompt` as its first message, " +
+            "so make the prompt self-contained. Times are the user's local time; call current_datetime " +
+            "first to resolve things like \"tomorrow at 9\". `repeat` is one of: once (needs `date` and " +
+            "`time`), interval (needs `every_minutes`, at least $MIN_INTERVAL_MINUTES), daily (needs " +
+            "`time`), weekly (needs `days` and `time`). For update, pass the id plus only the fields to " +
+            "change; get first if you need the current values.",
         parametersJson = """{"type":"object","properties":{
-"action":{"type":"string","enum":["create","list","delete","enable","disable"]},
-"id":{"type":"integer","description":"Schedule id, for delete / enable / disable"},
+"action":{"type":"string","enum":["create","list","get","update","delete","enable","disable"]},
+"id":{"type":"integer","description":"Schedule id, for get / update / delete / enable / disable"},
 "title":{"type":"string","description":"Short name shown in the notification"},
 "prompt":{"type":"string","description":"What the scheduled run should do"},
 "repeat":{"type":"string","enum":["once","interval","daily","weekly"]},
@@ -54,10 +55,12 @@ class ScheduleTool(
         return when (val action = args.text("action")) {
             "create" -> create(args)
             "list" -> list()
+            "get" -> withSchedule(args) { ToolResult(details(it)) }
+            "update" -> withSchedule(args) { update(it, args) }
             "delete" -> withSchedule(args) { scheduler.delete(it); ToolResult("Deleted schedule ${it.id} (${it.title}).") }
             "enable" -> withSchedule(args) { setEnabled(it, true) }
             "disable" -> withSchedule(args) { setEnabled(it, false) }
-            else -> ToolResult("unknown action '$action'; use create, list, delete, enable or disable", isError = true)
+            else -> err("unknown action '$action'; use create, list, get, update, delete, enable or disable")
         }
     }
 
@@ -68,68 +71,106 @@ class ScheduleTool(
     }
 
     private suspend fun create(args: JsonObject): ToolResult {
-        val prompt = args.text("prompt")?.trim().orEmpty()
-        if (prompt.isEmpty()) return err("missing 'prompt'")
+        if (args.text("prompt").isNullOrBlank()) return err("missing 'prompt'")
         if (scheduler.list(projectId).size >= MAX_PER_PROJECT) {
             return err("this project already has $MAX_PER_PROJECT schedules; delete one first")
         }
+        val entity = build(args, existing = null).getOrElse { return err(it.message.orEmpty()) }
+        val id = scheduler.save(entity)
+        val saved = scheduler.get(id) ?: return err("could not save the schedule")
+        return ToolResult("Created schedule $id: ${saved.title} — ${describe(saved)}")
+    }
+
+    private suspend fun update(existing: ScheduleEntity, args: JsonObject): ToolResult {
+        val entity = build(args, existing).getOrElse { return err(it.message.orEmpty()) }
+        scheduler.save(entity)
+        val saved = scheduler.get(existing.id) ?: return err("schedule ${existing.id} no longer exists")
+        return ToolResult("Updated schedule ${saved.id}: ${saved.title} — ${describe(saved)}")
+    }
+
+    /**
+     * Apply [args] on top of [existing] (or defaults when creating) and validate the result.
+     * Fields left out keep their current values, so an update can change just one thing.
+     */
+    private fun build(args: JsonObject, existing: ScheduleEntity?): Result<ScheduleEntity> = runCatching {
+        val zone = ZoneId.systemDefault()
         val kind = when (args.text("repeat")?.lowercase()) {
+            null -> existing?.let { ScheduleKind.from(it.kind) } ?: fail("missing 'repeat'")
             "once" -> ScheduleKind.ONCE
             "interval" -> ScheduleKind.INTERVAL
             "daily" -> ScheduleKind.DAILY
             "weekly" -> ScheduleKind.WEEKLY
-            else -> return err("'repeat' must be once, interval, daily or weekly")
+            else -> fail("'repeat' must be once, interval, daily or weekly")
         }
-        val zone = ZoneId.systemDefault()
-        val time = if (kind == ScheduleKind.INTERVAL) LocalTime.MIDNIGHT else
-            args.text("time")?.let { runCatching { LocalTime.parse(it.trim()) }.getOrNull() }
-                ?: return err("'time' must be HH:mm, e.g. 09:30")
-        var interval = 60
-        var mask = 0b1111111
-        var runAt = 0L
-        when (kind) {
-            ScheduleKind.ONCE -> {
-                val date = args.text("date")?.let { runCatching { LocalDate.parse(it.trim()) }.getOrNull() }
-                    ?: return err("'date' must be YYYY-MM-DD")
-                runAt = date.atTime(time).atZone(zone).toInstant().toEpochMilli()
-                if (runAt <= System.currentTimeMillis()) return err("that time is already in the past")
+        val prompt = args.text("prompt")?.trim()?.also { if (it.isEmpty()) fail("'prompt' must not be empty") }
+            ?: existing?.prompt ?: fail("missing 'prompt'")
+
+        var minuteOfDay = existing?.minuteOfDay ?: 9 * 60
+        args.text("time")?.let { raw ->
+            val t = runCatching { LocalTime.parse(raw.trim()) }.getOrNull() ?: fail("'time' must be HH:mm, e.g. 09:30")
+            minuteOfDay = t.hour * 60 + t.minute
+        }
+        // Switching an interval schedule to a clock-based one has no meaningful old time to keep.
+        val timeGiven = args.text("time") != null ||
+            (existing != null && ScheduleKind.from(existing.kind) != ScheduleKind.INTERVAL)
+        if (kind != ScheduleKind.INTERVAL && !timeGiven) fail("missing 'time'")
+
+        var interval = existing?.intervalMinutes ?: 60
+        if (kind == ScheduleKind.INTERVAL) {
+            val given = args["every_minutes"]?.jsonPrimitive?.intOrNull
+            if (given == null && (existing == null || ScheduleKind.from(existing.kind) != ScheduleKind.INTERVAL)) {
+                fail("missing 'every_minutes'")
             }
-            ScheduleKind.INTERVAL -> {
-                interval = args["every_minutes"]?.jsonPrimitive?.intOrNull ?: return err("missing 'every_minutes'")
-                if (interval < MIN_INTERVAL_MINUTES) return err("'every_minutes' must be at least $MIN_INTERVAL_MINUTES")
-            }
-            ScheduleKind.WEEKLY -> {
-                val names = runCatching { args["days"]!!.jsonArray.map { it.jsonPrimitive.content } }.getOrNull()
-                    ?: return err("'days' must be an array like [\"mon\",\"thu\"]")
+            interval = given ?: interval
+            if (interval < MIN_INTERVAL_MINUTES) fail("'every_minutes' must be at least $MIN_INTERVAL_MINUTES")
+        }
+
+        var mask = existing?.daysMask ?: 0b1111111
+        if (kind == ScheduleKind.WEEKLY) {
+            val raw = args["days"]
+            if (raw != null) {
+                val names = runCatching { raw.jsonArray.map { it.jsonPrimitive.content } }.getOrNull()
+                    ?: fail("'days' must be an array like [\"mon\",\"thu\"]")
                 mask = 0
                 for (n in names) {
-                    val day = DAY_NAMES[n.trim().lowercase().take(3)] ?: return err("unknown day '$n'")
+                    val day = DAY_NAMES[n.trim().lowercase().take(3)] ?: fail("unknown day '$n'")
                     mask = mask or (1 shl (day.value - 1))
                 }
-                if (mask == 0) return err("'days' must not be empty")
+            } else if (existing == null || ScheduleKind.from(existing.kind) != ScheduleKind.WEEKLY) {
+                fail("missing 'days'")
             }
-            ScheduleKind.DAILY -> Unit
+            if (mask == 0) fail("'days' must not be empty")
         }
-        val entity = ScheduleEntity(
-            projectId = projectId,
-            title = args.text("title")?.trim().orEmpty().ifBlank { prompt.take(32) },
+
+        var runAt = 0L
+        if (kind == ScheduleKind.ONCE) {
+            val wasOnce = existing != null && ScheduleKind.from(existing.kind) == ScheduleKind.ONCE
+            val date = args.text("date")?.let { runCatching { LocalDate.parse(it.trim()) }.getOrNull() ?: fail("'date' must be YYYY-MM-DD") }
+                ?: if (wasOnce && existing!!.nextRunAt > 0) Instant.ofEpochMilli(existing.nextRunAt).atZone(zone).toLocalDate()
+                else fail("missing 'date'")
+            runAt = date.atTime(LocalTime.of(minuteOfDay / 60, minuteOfDay % 60)).atZone(zone).toInstant().toEpochMilli()
+            if (runAt <= System.currentTimeMillis()) fail("that time is already in the past")
+        }
+
+        (existing ?: ScheduleEntity(projectId = projectId, title = "", prompt = prompt)).copy(
+            title = args.text("title")?.trim()?.takeIf { it.isNotEmpty() }
+                ?: existing?.title?.takeIf { it.isNotEmpty() } ?: prompt.take(32),
             prompt = prompt,
             kind = kind.name,
-            minuteOfDay = time.hour * 60 + time.minute,
+            minuteOfDay = minuteOfDay,
             daysMask = mask,
             intervalMinutes = interval,
             nextRunAt = runAt,
+            // Editing a schedule that had turned itself off (a finished one-time run) brings it back.
+            enabled = true,
         )
-        val id = scheduler.save(entity)
-        val saved = scheduler.get(id) ?: return err("could not save the schedule")
-        return ToolResult("Created schedule $id: ${saved.title} — ${describe(saved)}")
     }
 
     private suspend fun setEnabled(s: ScheduleEntity, on: Boolean): ToolResult {
         scheduler.save(s.copy(enabled = on))
         val now = scheduler.get(s.id) ?: return err("schedule ${s.id} no longer exists")
         return if (on && !now.enabled) {
-            err("schedule ${s.id} has no upcoming run (a one-time schedule in the past); create a new one")
+            err("schedule ${s.id} has no upcoming run (a one-time schedule in the past); update it with a new date or create a new one")
         } else {
             ToolResult("Schedule ${s.id} is now ${if (now.enabled) "on" else "off"}.")
         }
@@ -141,9 +182,24 @@ class ScheduleTool(
         return block(s)
     }
 
+    private fun fail(msg: String): Nothing = throw IllegalArgumentException(msg)
+
     private fun err(msg: String) = ToolResult(msg, isError = true)
 
     private fun JsonObject.text(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
+
+    private fun stamp(epoch: Long) = NEXT_FORMAT.format(Instant.ofEpochMilli(epoch).atZone(ZoneId.systemDefault()))
+
+    private fun details(s: ScheduleEntity): String = buildString {
+        appendLine("id: ${s.id}")
+        appendLine("title: ${s.title}")
+        appendLine("schedule: ${describe(s)}")
+        appendLine("enabled: ${s.enabled}")
+        if (s.lastRunAt > 0) appendLine("last run: ${stamp(s.lastRunAt)} (${s.lastStatus.lowercase().ifEmpty { "unknown" }})")
+        else if (s.lastStatus.isNotEmpty()) appendLine("last run: ${s.lastStatus.lowercase()}")
+        appendLine("prompt:")
+        append(s.prompt)
+    }
 
     private fun describe(s: ScheduleEntity): String {
         val time = "%02d:%02d".format(s.minuteOfDay / 60, s.minuteOfDay % 60)
@@ -155,8 +211,7 @@ class ScheduleTool(
                 .joinToString(",") { it.getDisplayName(TextStyle.SHORT, Locale.ENGLISH) } + " at $time"
         }
         if (!s.enabled || s.nextRunAt <= 0) return "$base, off"
-        val next = NEXT_FORMAT.format(Instant.ofEpochMilli(s.nextRunAt).atZone(ZoneId.systemDefault()))
-        return "$base, next run $next"
+        return "$base, next run ${stamp(s.nextRunAt)}"
     }
 
     private companion object {
