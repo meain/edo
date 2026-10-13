@@ -8,6 +8,10 @@ import com.edo.app.AppContainer
 import com.edo.app.data.ScheduleEntity
 import com.edo.app.llm.Block
 import com.edo.app.llm.Role
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.time.ZoneId
@@ -22,7 +26,8 @@ class ScheduleManager(private val app: Application, private val container: AppCo
     private val alarms = app.getSystemService(AlarmManager::class.java)
 
     /** Schedules with a run in flight; a second firing for the same one is skipped. */
-    private val running = mutableSetOf<Long>()
+    private val _running = MutableStateFlow<Set<Long>>(emptySet())
+    val running: StateFlow<Set<Long>> = _running.asStateFlow()
 
     /** False until the user grants "Alarms & reminders"; runs then drift by minutes under Doze. */
     fun canScheduleExact(): Boolean = alarms.canScheduleExactAlarms()
@@ -116,10 +121,11 @@ class ScheduleManager(private val app: Application, private val container: AppCo
 
     /** Run [s] now in a fresh thread and notify with the outcome. Also backs "Run now". */
     suspend fun run(s: ScheduleEntity) {
-        if (!running.add(s.id)) {
+        if (s.id in _running.value) {
             record(s.id) { it.copy(lastStatus = "SKIPPED") }
             return
         }
+        _running.update { it + s.id }
         try {
             val session = container.chatSessions.unattended(s.projectId)
             if (session == null) {
@@ -153,7 +159,7 @@ class ScheduleManager(private val app: Application, private val container: AppCo
             record(s.id) { it.copy(lastStatus = status, lastThreadId = threadId) }
             ScheduleNotifier.post(app, s, status, body, threadId)
         } finally {
-            running.remove(s.id)
+            _running.update { it - s.id }
         }
     }
 

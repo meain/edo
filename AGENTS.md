@@ -5,21 +5,24 @@ Claude-Code-style agent app for Android. Kotlin + Jetpack Compose, Material 3 wi
 ## Architecture
 
 - `app/src/main/java/com/edo/app/`
-  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`), encrypted prefs for API key/provider/model/active IDs
+  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`; currently v6), encrypted prefs for API key/provider/model/active IDs
   - `llm/` — `AnthropicClient`, `OpenAIClient`, shared `LlmClient` + streaming `LlmEvent` types
   - `agent/` — `Agent` loop, `ApprovalGate`, tool implementations (see Tools below), `SafWorkspace` / `FileWorkspace` / `InMemoryWorkspace`
-  - `ui/chat/` — `ChatScreen` + `ChatViewModel` (the main screen)
-  - `ui/projects/` — project list + create/edit sheets (SAF folder picker pre-navigated to `/sdcard/Edo`)
-  - `ui/threads/` — per-project thread list (Claude Code-style chat sessions)
-  - `ui/files/` — workspace file browser with Markdown preview and long-press actions
+  - `schedule/` — scheduled prompts: `ScheduleManager` (save/run/re-arm), `Recurrence` (next-run maths), `ScheduleReceiver` (alarm + boot/time broadcasts), `ScheduleNotifier`
+  - `ui/SwipePanels.kt` — container giving the chat screen a left (chats) and right (files) full-width panel that follow the finger
+  - `ui/chat/` — `ChatScreen` + `ChatViewModel` (the main screen); `ChatSession` / `ChatSessions` hold each chat's conversation and agent run on the app scope
+  - `ui/projects/` — project list as a top card (dialog route) + create/edit sheets (SAF folder picker pre-navigated to `/sdcard/Edo`)
+  - `ui/threads/` — per-project chat list, shown as the left panel of the chat screen
+  - `ui/files/` — workspace file browser, shown as the right panel; Markdown preview and long-press actions
+  - `ui/schedules/` — per-project schedule list + editor, with Run now
   - `ui/settings/` — provider/key/model
-- `MainActivity.kt` — single activity, edge-to-edge, NavHost with `chat`/`projects`/`threads`/`settings`/`files` destinations
+- `MainActivity.kt` — single activity, edge-to-edge, NavHost with `chat` (hosts the swipe panels), `projects` (dialog), `schedules`, `settings`, `share` destinations
 
 Threads are scoped to projects, messages to threads. `AppSettings.activeProjectId`/`activeThreadId` persist the current selection. Switching projects clears the active thread.
 
 ## Tools
 
-13 tools total, all scoped to the project workspace:
+15 tools total, all scoped to the project workspace:
 
 | Tool | Description |
 |------|-------------|
@@ -36,13 +39,23 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 | `ask_user` | Ask the user a question with predefined options or freetext |
 | `calculator` | Evaluate math expressions (supports +, -, *, /, ^, sqrt, sin, cos, tan, log, ln, exp, etc.) |
 | `load_skill` | Load a skill Markdown file from `.agents/skills/` |
+| `run_lua` | Run a sandboxed Lua 5.2 program (math/string/table only, no file or network access) |
+| `schedule` | Create, list, get, update, delete, enable, disable scheduled prompts for the current project (not offered to scheduled runs) |
 
 ## Agent loop
 
-- Max turns per run (Settings, default 50)
+- Max turns per run (Settings, default 50); a project can override the model and max turns (`ProjectEntity.modelOverride` / `maxTurnsOverride`, applied via `AppSettings.withOverrides`)
 - Up to 5 retries on failure with exponential backoff (2 s, 4 s, 8 s, 15 s)
 - System prompt is dynamically augmented with `AGENTS.md` from workspace root + discovered skills
 - `ApprovalGate` prompts the user for each tool call unless yolo mode is on; once approved, that tool auto-approves for the rest of the session
+- Dismissing the `ask_user` sheet resolves the tool call as an error ("dismissed") rather than leaving the run waiting
+
+## Scheduling
+
+- Schedules are per project: ONCE, INTERVAL (min 15 min), DAILY, WEEKLY. One exact alarm (`setExactAndAllowWhileIdle`, inexact fallback without `SCHEDULE_EXACT_ALARM`) always points at the earliest `next_run_at`; `ScheduleManager.rearm()` re-aims it after any change.
+- `ScheduleReceiver` handles the alarm (`takeDue()` advances each due schedule, then `run()` executes it) and boot / app-update / clock / time-zone broadcasts (`resync()`). Runs missed while the phone was off are skipped, not replayed. `EdoApp.onCreate` only re-arms (never resyncs), so an alarm-started process doesn't skip its own run.
+- Each run is an unattended `ChatSession` (`ChatSessions.unattended`) in a new thread titled "⏰ title · time": tool calls are denied unless the project is yolo, `ask_user` gets a canned answer, it never steals the on-screen chat, it gets no `schedule` tool, and it is cut off after 10 minutes. A run for a schedule already running is skipped. The outcome is posted via `ScheduleNotifier` (channel `schedule_results`); tapping it opens the thread.
+- "Run now" in the schedules list launches on the app scope (leaving the screen must not cancel it) and shows a spinner via `ScheduleManager.running`.
 
 ## Skills
 
@@ -79,7 +92,7 @@ adb -s 192.168.1.3:38181 exec-out screencap -p > /tmp/edo.png
 adb -s 192.168.1.3:38181 shell uiautomator dump /sdcard/window.xml   # then `cat | tr '>' '\n' | grep text=` to find tap coords
 ```
 
-The wireless port changes every time wireless debugging is toggled; expect to re-discover via `adb mdns services` or fall back to USB pairing.
+The wireless port changes every time wireless debugging is toggled; expect to re-discover via `adb mdns services` or fall back to USB pairing. The device also shows up under its mDNS id (`adb-<serial>._adb-tls-connect._tcp`, see `adb devices`), which keeps working when the IP:port rotates.
 
 ## Workspace files
 
@@ -92,3 +105,7 @@ All project workspaces live under `/sdcard/Edo/<name>` on the device. The SAF pi
 - Yolo mode is per-project (`ProjectEntity.yoloMode`), not global — it bypasses the approval bottom sheet so every tool call auto-approves for that project.
 - Orphaned tool_use messages (assistant messages with unanswered tool calls) are stripped from the conversation on reload to avoid API rejections.
 - `InMemoryWorkspace` is a HashMap-backed workspace used exclusively in unit tests — it is not exposed in the UI.
+- `SwipePanels` drives both edge panels from one horizontal `draggable` on the chat route, so a child that consumes horizontal drags (code blocks, lists) wins. The chats panel stays composed offscreen to avoid a first-frame hitch; the files panel is composed on demand. The panels replaced the old `threads` / `files` nav routes.
+- Pulling up past the end of a conversation (`ChatScreen`, nested scroll) suggests a new chat; the pull is resisted 2:1 and disabled while the agent runs.
+- Bare URLs are linkified by commonmark's autolink extension, then rendered like `[text](url)` links.
+- Room uses explicit migrations (3→4 … 5→6) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.

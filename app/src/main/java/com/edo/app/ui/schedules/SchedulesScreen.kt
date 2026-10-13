@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -106,6 +107,7 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
     var editing by remember { mutableStateOf<ScheduleEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<ScheduleEntity?>(null) }
+    val runningIds by container.scheduler.running.collectAsState()
     // Re-checked on each recomposition so the banner clears after returning from system settings.
     val exactOk = container.scheduler.canScheduleExact()
 
@@ -186,11 +188,14 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
                     items(schedules, key = { it.id }) { s ->
                         ScheduleRow(
                             s,
+                            running = s.id in runningIds,
                             onEdit = { editing = s },
                             onToggle = { on -> scope.launch { container.scheduler.save(s.copy(enabled = on)) } },
                             onRunNow = {
                                 ensureNotificationPermission()
-                                scope.launch { container.scheduler.run(s) }
+                                // App scope, not the screen's: leaving this screen must not cancel the run
+                                // or drop its notification.
+                                container.appScope.launch { container.scheduler.run(s) }
                             },
                             onDelete = { confirmDelete = s },
                         )
@@ -243,6 +248,7 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
 @Composable
 private fun ScheduleRow(
     s: ScheduleEntity,
+    running: Boolean,
     onEdit: () -> Unit,
     onToggle: (Boolean) -> Unit,
     onRunNow: () -> Unit,
@@ -264,19 +270,23 @@ private fun ScheduleRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            val last = lastRunLabel(s)
+            val last = if (running) "Running…" else lastRunLabel(s)
             if (last.isNotEmpty()) {
                 Text(
                     last,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (s.lastStatus == "FAILED" || s.lastStatus == "TIMEOUT") MaterialTheme.colorScheme.error
+                    color = if (!running && (s.lastStatus == "FAILED" || s.lastStatus == "TIMEOUT")) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
             }
         }
-        IconButton(onClick = onRunNow, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Filled.PlayArrow, "Run now", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        IconButton(onClick = onRunNow, enabled = !running, modifier = Modifier.size(36.dp)) {
+            if (running) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Filled.PlayArrow, "Run now", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Filled.Delete, "Delete", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
