@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -26,8 +28,11 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -86,6 +91,17 @@ fun SwipePanels(
     val rightVisible by remember { derivedStateOf { state.offset < 0f } }
     val anyOpen = leftVisible || rightVisible
     BackHandler(enabled = anyOpen) { state.close() }
+
+    // Drop the keyboard as soon as a panel starts sliding in, and again when it closes so a
+    // field focused inside the panel (chat search) doesn't leave it up over the chat.
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        snapshotFlow { state.offset != 0f }.drop(1).collect {
+            focusManager.clearFocus()
+            keyboard?.hide()
+        }
+    }
 
     val dragState = rememberDraggableState { delta ->
         val w = state.width
