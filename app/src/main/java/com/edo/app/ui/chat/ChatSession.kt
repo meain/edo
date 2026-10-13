@@ -17,8 +17,7 @@ import com.edo.app.agent.GrepTool
 import com.edo.app.agent.HttpRequestTool
 import com.edo.app.agent.KtorHttpFetcher
 import com.edo.app.agent.LoadSkillTool
-import com.edo.app.agent.LsTool
-import com.edo.app.agent.ReadFileTool
+import com.edo.app.agent.ReadTool
 import com.edo.app.agent.RunLuaTool
 import com.edo.app.agent.ScheduleTool
 import com.edo.app.agent.SafWorkspace
@@ -336,12 +335,11 @@ class ChatSession internal constructor(
             listOfNotNull(
                 // Scheduled runs don't get it, so a schedule can't create more schedules.
                 if (unattended) null else ScheduleTool(container.scheduler, projectId),
-                ReadFileTool(ws),
+                ReadTool(ws),
                 WriteFileTool(ws),
                 EditFileTool(ws),
                 DeleteFileTool(ws),
                 CopyFileTool(ws),
-                LsTool(ws),
                 GrepTool(ws),
                 HttpRequestTool(KtorHttpFetcher(container.http)),
                 WebSearchTool(KtorHttpFetcher(container.http)),

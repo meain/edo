@@ -65,21 +65,92 @@ internal fun argsParseError(argsJson: String): ToolResult {
 private fun JsonObject.str(key: String): String? =
     this[key]?.jsonPrimitive?.contentOrNull
 
+private fun JsonObject.int(key: String): Int? =
+    this[key]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+
 private const val MAX_BYTES = 256 * 1024
 
-class ReadFileTool(private val ws: Workspace) : Tool {
+private const val MAX_LISTED = 500
+
+/**
+ * Converts a glob to a regex over workspace-relative paths. `**` crosses
+ * directories, `*` and `?` stay within one segment, `{a,b}` is alternation.
+ * A pattern without a `/` matches the file name at any depth.
+ */
+internal fun globToRegex(glob: String): Regex {
+    val sb = StringBuilder()
+    if (!glob.contains('/')) sb.append("(?:.*/)?")
+    var i = 0
+    var inGroup = false
+    while (i < glob.length) {
+        val c = glob[i]
+        when {
+            c == '*' && glob.startsWith("**/", i) -> { sb.append("(?:.*/)?"); i += 2 }
+            c == '*' && glob.startsWith("**", i) -> { sb.append(".*"); i += 1 }
+            c == '*' -> sb.append("[^/]*")
+            c == '?' -> sb.append("[^/]")
+            c == '{' -> { sb.append("(?:"); inGroup = true }
+            c == '}' && inGroup -> { sb.append(")"); inGroup = false }
+            c == ',' && inGroup -> sb.append("|")
+            else -> sb.append(Regex.escape(c.toString()))
+        }
+        i++
+    }
+    return Regex(sb.toString())
+}
+
+class ReadTool(private val ws: Workspace) : Tool {
     override val spec = ToolSpec(
-        name = "read_file",
-        description = "Read a text file under the workspace.",
-        parametersJson = """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""",
+        name = "read",
+        description = "Read a path under the workspace. A file returns its text; 'offset' (1-based line) and 'limit' (lines) read a slice of a large file. A directory lists its entries; add 'pattern' (a glob such as '**/*.md' or '*.kt') to search the whole tree below it for matching files instead.",
+        parametersJson = """{"type":"object","properties":{"path":{"type":"string"},"pattern":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}""",
     )
 
     override suspend fun invoke(argsJson: String): ToolResult {
         val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
-        val path = args.str("path") ?: return ToolResult("missing 'path'", isError = true)
+        val path = args.str("path") ?: ""
+        val pattern = args.str("pattern")?.takeIf { it.isNotBlank() }
+        val entries = ws.ls(path)
+        if (entries != null) return if (pattern != null) glob(path, pattern) else list(entries)
+        if (path.isBlank()) return ToolResult("not a directory: $path", isError = true)
+        if (pattern != null) return ToolResult("'pattern' only applies to directories: $path", isError = true)
         val text = ws.read(path) ?: return ToolResult("not found: $path", isError = true)
-        val out = if (text.length > MAX_BYTES) text.substring(0, MAX_BYTES) + "\n…[truncated]" else text
-        return ToolResult(out)
+        return ToolResult(slice(text, args.int("offset"), args.int("limit")))
+    }
+
+    private fun list(entries: List<Workspace.Entry>): ToolResult {
+        if (entries.isEmpty()) return ToolResult("(empty)")
+        val sorted = entries.sortedWith(compareBy({ !it.isDir }, { it.name }))
+        return ToolResult(
+            sorted.joinToString("\n") { e ->
+                if (e.isDir) "${e.name}/" else "${e.name}  (${e.size} bytes)"
+            },
+        )
+    }
+
+    private fun glob(path: String, pattern: String): ToolResult {
+        val regex = runCatching { globToRegex(pattern) }.getOrElse {
+            return ToolResult("invalid pattern: ${it.message}", isError = true)
+        }
+        val hits = ws.walk(path).filter { !it.isDir && regex.matches(it.name) }.take(MAX_LISTED + 1).toList()
+        if (hits.isEmpty()) return ToolResult("(no matches)")
+        val shown = hits.take(MAX_LISTED).sortedBy { it.name }
+        val out = shown.joinToString("\n") { "${it.name}  (${it.size} bytes)" }
+        return ToolResult(if (hits.size > MAX_LISTED) "$out\n…[truncated at $MAX_LISTED matches]" else out)
+    }
+
+    private fun slice(text: String, offset: Int?, limit: Int?): String {
+        var body = text
+        var note = ""
+        if (offset != null || limit != null) {
+            val lines = text.lines()
+            val from = ((offset ?: 1) - 1).coerceIn(0, lines.size)
+            val to = if (limit != null) (from + limit).coerceIn(from, lines.size) else lines.size
+            body = lines.subList(from, to).joinToString("\n")
+            note = "[lines ${from + 1}-$to of ${lines.size}]\n"
+        }
+        if (body.length <= MAX_BYTES) return note + body
+        return note + body.substring(0, MAX_BYTES) + "\n…[truncated; use offset and limit to read the rest]"
     }
 }
 
@@ -188,26 +259,6 @@ class CopyFileTool(private val ws: Workspace) : Tool {
         val ok = ws.copy(source, dest)
         if (!ok) return ToolResult("failed to copy $source → $dest", isError = true)
         return ToolResult("copied $source → $dest")
-    }
-}
-
-class LsTool(private val ws: Workspace) : Tool {
-    override val spec = ToolSpec(
-        name = "ls",
-        description = "List directory contents under the workspace.",
-        parametersJson = """{"type":"object","properties":{"path":{"type":"string"}}}""",
-    )
-
-    override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
-        val path = args.str("path") ?: ""
-        val entries = ws.ls(path) ?: return ToolResult("not a directory: $path", isError = true)
-        if (entries.isEmpty()) return ToolResult("(empty)")
-        val sorted = entries.sortedWith(compareBy({ !it.isDir }, { it.name }))
-        val lines = sorted.joinToString("\n") { e ->
-            if (e.isDir) "${e.name}/" else "${e.name}  (${e.size} bytes)"
-        }
-        return ToolResult(lines)
     }
 }
 

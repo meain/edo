@@ -16,6 +16,23 @@ interface Workspace {
     fun delete(path: String): Boolean
     fun copy(source: String, dest: String): Boolean
     fun ls(path: String): List<Entry>?
+    /**
+     * Every file and directory below [path], recursively. [Entry.name] is the path
+     * relative to [path]. Built on [ls], so it needs no per-workspace code.
+     */
+    fun walk(path: String): Sequence<Entry> = sequence {
+        val stack = ArrayDeque<String>()
+        stack.addLast("")
+        while (stack.isNotEmpty()) {
+            val rel = stack.removeLast()
+            val dir = if (path.isBlank()) rel else if (rel.isEmpty()) path else "${path.trimEnd('/')}/$rel"
+            for (e in ls(dir) ?: continue) {
+                val childRel = if (rel.isEmpty()) e.name else "$rel/${e.name}"
+                yield(e.copy(name = childRel))
+                if (e.isDir) stack.addLast(childRel)
+            }
+        }
+    }
     /** Walk relative paths under [path] for grep-style search. */
     fun walkTextFiles(path: String): Sequence<TextFile>
     /** Content URI for a file, when available (used by the file manager's "open with"). */

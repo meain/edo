@@ -11,15 +11,65 @@ class ToolsTest {
     @Test
     fun readFileReturnsContent() = runTest {
         val ws = InMemoryWorkspace(mapOf("a.txt" to "hello"))
-        val r = ReadFileTool(ws).invoke("""{"path":"a.txt"}""")
+        val r = ReadTool(ws).invoke("""{"path":"a.txt"}""")
         assertFalse(r.isError)
         assertEquals("hello", r.content)
     }
 
     @Test
-    fun readFileMissingPathIsError() = runTest {
+    fun readMissingPathIsError() = runTest {
         val ws = InMemoryWorkspace()
-        val r = ReadFileTool(ws).invoke("""{}""")
+        val r = ReadTool(ws).invoke("""{"path":"nope.txt"}""")
+        assertTrue(r.isError)
+        assertTrue(r.content.contains("not found"))
+    }
+
+    @Test
+    fun readSliceByOffsetAndLimit() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.txt" to "one\ntwo\nthree\nfour"))
+        val r = ReadTool(ws).invoke("""{"path":"a.txt","offset":2,"limit":2}""")
+        assertFalse(r.isError)
+        assertEquals("[lines 2-3 of 4]\ntwo\nthree", r.content)
+    }
+
+    @Test
+    fun readOffsetPastEndIsEmptySlice() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.txt" to "one\ntwo"))
+        val r = ReadTool(ws).invoke("""{"path":"a.txt","offset":99}""")
+        assertFalse(r.isError)
+        assertEquals("[lines 3-2 of 2]\n", r.content)
+    }
+
+    @Test
+    fun readGlobFindsFilesAtAnyDepth() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.md" to "x", "docs/b.md" to "y", "docs/c.txt" to "z"))
+        val r = ReadTool(ws).invoke("""{"pattern":"*.md"}""")
+        assertFalse(r.isError)
+        assertTrue(r.content.contains("a.md"))
+        assertTrue(r.content.contains("docs/b.md"))
+        assertFalse(r.content.contains("c.txt"))
+    }
+
+    @Test
+    fun readGlobScopedToDirectoryWithAlternation() = runTest {
+        val ws = InMemoryWorkspace(mapOf("src/a.kt" to "x", "src/deep/b.java" to "y", "other/c.kt" to "z"))
+        val r = ReadTool(ws).invoke("""{"path":"src","pattern":"**/*.{kt,java}"}""")
+        assertFalse(r.isError)
+        assertTrue(r.content.contains("a.kt"))
+        assertTrue(r.content.contains("deep/b.java"))
+        assertFalse(r.content.contains("c.kt"))
+    }
+
+    @Test
+    fun readGlobNoMatches() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.txt" to "x"))
+        assertEquals("(no matches)", ReadTool(ws).invoke("""{"pattern":"*.md"}""").content)
+    }
+
+    @Test
+    fun readPatternOnFileIsError() = runTest {
+        val ws = InMemoryWorkspace(mapOf("a.txt" to "x"))
+        val r = ReadTool(ws).invoke("""{"path":"a.txt","pattern":"*.md"}""")
         assertTrue(r.isError)
     }
 
@@ -84,7 +134,7 @@ class ToolsTest {
     @Test
     fun lsListsTopLevel() = runTest {
         val ws = InMemoryWorkspace(mapOf("a.txt" to "x", "sub/b.txt" to "y"))
-        val r = LsTool(ws).invoke("""{}""")
+        val r = ReadTool(ws).invoke("""{}""")
         assertFalse(r.isError)
         assertTrue(r.content.contains("sub/"))
         assertTrue(r.content.contains("a.txt"))

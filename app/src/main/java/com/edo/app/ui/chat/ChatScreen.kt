@@ -1660,6 +1660,11 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
             if (src.isBlank() && dst.isBlank()) "" else "$src → $dst"
         }
         "ls" -> s("path") ?: "/"
+        "read" -> {
+            val path = s("path")?.ifBlank { null } ?: "/"
+            val pattern = s("pattern")
+            if (pattern.isNullOrBlank()) path else "$path ($pattern)"
+        }
         "grep" -> {
             val pattern = s("pattern") ?: ""
             val path = s("path")
@@ -1677,7 +1682,7 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
         else -> ""
     }
     val label = when (name) {
-        "read_file" -> "Read"
+        "read_file", "read" -> "Read"
         "write_file" -> "Write"
         "edit_file" -> "Edit"
         "delete_file" -> "Delete"
@@ -1710,7 +1715,7 @@ internal fun extractPartialString(partial: String, field: String): String? {
 
 internal fun iconForTool(name: String, isError: Boolean): androidx.compose.ui.graphics.vector.ImageVector = when {
     isError -> Icons.Filled.Error
-    name == "read_file" -> Icons.AutoMirrored.Filled.MenuBook
+    name == "read_file" || name == "read" -> Icons.AutoMirrored.Filled.MenuBook
     name == "write_file" -> Icons.Filled.Save
     name == "edit_file" -> Icons.Filled.Edit
     name == "delete_file" -> Icons.Filled.DeleteOutline
@@ -1770,8 +1775,8 @@ private fun ToolExpandedContent(name: String, argsJson: String, result: String?,
                     )
                 }
             }
-            "read_file" -> {
-                // Path is shown in header; result is the file content
+            "read_file", "read" -> {
+                // Path is shown in header; result is the file content or listing
                 if (result != null) ResultBlock(result, isError)
             }
             else -> {

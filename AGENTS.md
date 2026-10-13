@@ -22,16 +22,15 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 
 ## Tools
 
-15 tools total, all scoped to the project workspace:
+14 tools total, all scoped to the project workspace:
 
 | Tool | Description |
 |------|-------------|
-| `read_file` | Read text files (max 256 KB, truncates with warning) |
+| `read` | Read a path: a file returns text (`offset`/`limit` lines, max 256 KB, truncates with warning); a directory lists entries; a directory plus `pattern` (glob) searches the tree for matching files (max 500) |
 | `write_file` | Create or overwrite an entire file |
 | `edit_file` | Replace exact text in a file (`replace_all` flag available) |
 | `copy_file` | Copy a file within the workspace |
 | `delete_file` | Delete a file or directory recursively |
-| `ls` | List directory contents with sizes |
 | `grep` | Regex search across text files (max 500 matches) |
 | `http_request` | Make HTTP requests (any method, custom headers) |
 | `web_search` | DuckDuckGo Lite search (lynx user agent) returning titles, URLs, snippets |
