@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,7 +22,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -37,7 +43,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.edo.app.AppContainer
@@ -53,9 +61,14 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val activeProjectId by container.activeProjectId.collectAsState()
     val activeThreadId by container.activeThreadId.collectAsState()
-    val threadsFlow = remember(activeProjectId) {
-        if (activeProjectId > 0) container.db.threads().observeForProject(activeProjectId)
-        else flowOf(emptyList())
+    var query by remember { mutableStateOf("") }
+    val trimmedQuery = query.trim()
+    val threadsFlow = remember(activeProjectId, trimmedQuery) {
+        when {
+            activeProjectId <= 0 -> flowOf(emptyList())
+            trimmedQuery.isEmpty() -> container.db.threads().observeForProject(activeProjectId)
+            else -> container.db.threads().searchForProject(activeProjectId, escapeLike(trimmedQuery))
+        }
     }
     val threads by threadsFlow.collectAsState(initial = emptyList())
     var projectName by remember { mutableStateOf("") }
@@ -66,6 +79,7 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
         else "Chats"
     }
     var confirmDelete by remember { mutableStateOf<ThreadEntity?>(null) }
+    val focusManager = LocalFocusManager.current
 
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Row(
@@ -93,11 +107,13 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
         }
         if (threads.isEmpty()) {
             Text(
-                "No chats yet. Tap New to start one.",
+                if (trimmedQuery.isEmpty()) "No chats yet. Tap New to start one."
+                else "No chats match \"$trimmedQuery\".",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             )
+            Spacer(Modifier.weight(1f))
         } else {
             // Newest-first data with a reversed layout: latest chat sits at the bottom, in thumb reach.
             LazyColumn(
@@ -118,6 +134,26 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
                 }
             }
         }
+        // At the bottom, next to the newest chats and in thumb reach. Searches titles and messages.
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("Search chats") },
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(20.dp)) },
+            trailingIcon = if (query.isNotEmpty()) {
+                {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear search", modifier = Modifier.size(18.dp))
+                    }
+                }
+            } else null,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+            shape = MaterialTheme.shapes.large,
+            textStyle = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.fillMaxWidth().imePadding().padding(horizontal = 8.dp, vertical = 6.dp),
+        )
     }
 
     confirmDelete?.let { thread ->
@@ -200,6 +236,10 @@ private fun ThreadRow(
         }
     }
 }
+
+/** Escapes LIKE wildcards so the query matches literally (pairs with `ESCAPE '\'`). */
+private fun escapeLike(s: String): String =
+    s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 private fun relativeTime(ts: Long): String {
     val now = System.currentTimeMillis()

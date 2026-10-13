@@ -69,6 +69,17 @@ interface ThreadDao {
     @Query("SELECT * FROM threads WHERE project_id = :projectId ORDER BY last_updated_at DESC")
     fun observeForProject(projectId: Long): Flow<List<ThreadEntity>>
 
+    /** Chats whose title or any message contains [query] (case-insensitive for ASCII). */
+    @Query(
+        """
+        SELECT * FROM threads WHERE project_id = :projectId AND (
+            title LIKE '%' || :query || '%' ESCAPE '\'
+            OR id IN (SELECT thread_id FROM messages WHERE content_json LIKE '%' || :query || '%' ESCAPE '\')
+        ) ORDER BY last_updated_at DESC
+        """
+    )
+    fun searchForProject(projectId: Long, query: String): Flow<List<ThreadEntity>>
+
     @Query("SELECT * FROM threads WHERE id = :id")
     suspend fun getById(id: Long): ThreadEntity?
 
