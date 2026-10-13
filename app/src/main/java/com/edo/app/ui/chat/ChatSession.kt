@@ -348,7 +348,8 @@ class ChatSession internal constructor(
                 CalculatorTool(),
                 LoadSkillTool(ws),
                 AskUserQuestionTool(askUser),
-                RunLuaTool(),
+                // Always on, with file access scoped to this project's workspace; network is a per-project opt-in.
+                RunLuaTool(ws, KtorHttpFetcher(container.http), project.luaNetwork),
             )
         )
         val llm = buildLlm(settings)

@@ -28,6 +28,12 @@ data class ProjectEntity(
     /** Null means "use the global setting". */
     @ColumnInfo(name = "model_override") val modelOverride: String? = null,
     @ColumnInfo(name = "max_turns_override") val maxTurnsOverride: Int? = null,
+    /**
+     * Opt-in: lets the `run_lua` tool make HTTP requests. Lua itself (compute plus read/write inside
+     * this project's folder) is always on. The column keeps its original name so no migration is
+     * needed.
+     */
+    @ColumnInfo(name = "lua_enabled", defaultValue = "0") val luaNetwork: Boolean = false,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
 )
 
@@ -172,7 +178,7 @@ interface ScheduleDao {
 
 @Database(
     entities = [ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -224,13 +230,20 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v6 → v7: per-project opt-in for Lua network access (off for existing projects). */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE projects ADD COLUMN lua_enabled INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }

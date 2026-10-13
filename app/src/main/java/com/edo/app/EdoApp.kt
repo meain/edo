@@ -1,6 +1,7 @@
 package com.edo.app
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import com.edo.app.data.ChatDatabase
 import com.edo.app.data.EncryptedSettingsStore
@@ -16,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -57,6 +59,36 @@ class AppContainer(private val app: Application) {
         settings.save(settings.load().copy(activeThreadId = id))
     }
 
+    /**
+     * Workspace-folder picker. The picker stops the activity, which disposes whatever composable
+     * launched it, so the launcher lives on the activity and the result is published here for the
+     * sheet to consume once it is back.
+     */
+    var launchFolderPicker: (initial: Uri?) -> Unit = {}
+    val pickedFolder = MutableStateFlow<String?>(null)
+
+    /** Drops the persisted folder grant for [uri] unless another project still points at it. */
+    suspend fun releaseGrant(uri: String) {
+        if (db.projects().observeAll().first().any { it.workspaceUri == uri }) return
+        runCatching {
+            app.contentResolver.releasePersistableUriPermission(
+                Uri.parse(uri),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
+    }
+
+    /**
+     * Releases folder grants no project points at (deleted projects, a wiped DB, an abandoned
+     * pick), so the app only ever holds access to folders that belong to a project.
+     */
+    suspend fun releaseOrphanGrants() {
+        val used = db.projects().observeAll().first().map { it.workspaceUri }.toSet()
+        for (perm in app.contentResolver.persistedUriPermissions) {
+            if (perm.uri.toString() !in used) releaseGrant(perm.uri.toString())
+        }
+    }
+
     private val _pendingShare = MutableStateFlow<SharedContent?>(null)
     /** Content received via the system share sheet, until the chat screen consumes it. */
     val pendingShare: StateFlow<SharedContent?> = _pendingShare.asStateFlow()
@@ -91,5 +123,6 @@ class EdoApp : Application() {
         // Make sure the alarm matches the table (e.g. after the system cleared it). Not a
         // resync: if this process was started by the alarm itself, its run must not be skipped.
         container.appScope.launch { container.scheduler.rearm() }
+        container.appScope.launch { container.releaseOrphanGrants() }
     }
 }

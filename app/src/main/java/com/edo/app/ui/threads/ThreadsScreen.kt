@@ -99,7 +99,10 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             )
         } else {
+            // Newest-first data with a reversed layout: latest chat sits at the bottom, in thumb reach.
             LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                reverseLayout = true,
                 contentPadding = PaddingValues(bottom = 8.dp),
             ) {
                 items(threads, key = { it.id }) { thread ->

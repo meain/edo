@@ -3,6 +3,7 @@ package com.edo.app.agent
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import com.edo.app.data.WorkspaceScope
 import java.io.OutputStream
 
 /**
@@ -120,7 +121,7 @@ class SafWorkspace(
     private fun resolve(path: String): DocumentFile? {
         val r = root ?: return null
         if (path.isBlank() || path == "/" || path == ".") return r
-        val parts = path.trim('/').split('/').filter { it.isNotEmpty() }
+        val parts = WorkspaceScope.safeSegments(path) ?: return null
         var cur: DocumentFile = r
         for (p in parts) {
             cur = cur.findFile(p) ?: return null
@@ -129,7 +130,7 @@ class SafWorkspace(
     }
 
     private fun walkOrCreateDirs(root: DocumentFile, path: String): Pair<DocumentFile, String>? {
-        val parts = path.trim('/').split('/').filter { it.isNotEmpty() }
+        val parts = WorkspaceScope.safeSegments(path) ?: return null
         if (parts.isEmpty()) return null
         var cur = root
         for (i in 0 until parts.size - 1) {
@@ -200,7 +201,10 @@ class FileWorkspace(private val root: java.io.File) : Workspace {
     private fun resolve(path: String): java.io.File? {
         if (path.isBlank() || path == "/" || path == ".") return root
         val f = java.io.File(root, path.trim('/'))
-        return if (f.canonicalPath.startsWith(root.canonicalPath)) f else null
+        val rootPath = root.canonicalPath
+        // Compare with a separator so a sibling like "<root>-other" isn't treated as inside.
+        val inside = f.canonicalPath == rootPath || f.canonicalPath.startsWith(rootPath + java.io.File.separator)
+        return if (inside) f else null
     }
 }
 
@@ -233,6 +237,8 @@ class InMemoryWorkspace(initial: Map<String, String> = emptyMap()) : Workspace {
 
     override fun ls(path: String): List<Workspace.Entry>? {
         val prefix = normalize(path).let { if (it.isEmpty()) "" else "$it/" }
+        // Like the real workspaces: a path with nothing under it is not a directory.
+        if (prefix.isNotEmpty() && files.keys.none { it.startsWith(prefix) }) return null
         val direct = mutableMapOf<String, Workspace.Entry>()
         for ((p, c) in files) {
             if (!p.startsWith(prefix) && prefix.isNotEmpty()) continue

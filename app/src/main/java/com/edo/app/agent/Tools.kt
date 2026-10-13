@@ -4,11 +4,25 @@ import com.edo.app.llm.ToolSpec
 import kotlin.math.*
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.luaj.vm2.Globals
+import org.luaj.vm2.LoadState
+import org.luaj.vm2.LuaError
+import org.luaj.vm2.LuaTable
 import org.luaj.vm2.LuaValue
 import org.luaj.vm2.Varargs
+import org.luaj.vm2.compiler.LuaC
+import org.luaj.vm2.lib.BaseLib
+import org.luaj.vm2.lib.Bit32Lib
+import org.luaj.vm2.lib.CoroutineLib
+import org.luaj.vm2.lib.PackageLib
+import org.luaj.vm2.lib.StringLib
+import org.luaj.vm2.lib.OneArgFunction
+import org.luaj.vm2.lib.TableLib
+import org.luaj.vm2.lib.TwoArgFunction
 import org.luaj.vm2.lib.VarArgFunction
-import org.luaj.vm2.lib.jse.JsePlatform
+import org.luaj.vm2.lib.jse.JseMathLib
 import io.ktor.client.request.headers
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -362,12 +376,113 @@ class CalculatorTool : Tool {
     }
 }
 
-class RunLuaTool : Tool {
+/**
+ * Sandboxed Lua, always on. Besides computation it can read, write and delete files through
+ * `fs.*`, served by [ws] so paths get exactly the scoping of the file tools and can't leave this
+ * project's folder. Network (`http.*`, via [fetcher]) is a per-project opt-in ([allowNetwork]).
+ *
+ * The Lua state is built from an allowlist of libraries; there is no `io`, `os`, `luajava` or
+ * `debug`, so `fs` and `http` are the only ways out of the interpreter.
+ */
+class RunLuaTool(
+    private val ws: Workspace,
+    private val fetcher: HttpFetcher? = null,
+    private val allowNetwork: Boolean = false,
+) : Tool {
+    private val network = allowNetwork && fetcher != null
+
     override val spec = ToolSpec(
         name = "run_lua",
-        description = "Execute a Lua 5.2 program and return its output. Use print() to produce output. math, string, and table libraries are available; file/os/network access is not. Execution times out after 10 seconds.",
+        description = buildString {
+            append("Execute a Lua 5.2 program and return its output. Use print() to produce output. ")
+            append("Libraries: math, string, table, bit32, coroutine (no os, io or require). ")
+            append("File access is limited to this project's workspace (paths relative to its root, ")
+            append("cannot leave it): fs.read(path) -> string or nil, fs.ls(path) -> list of ")
+            append("{name, dir, size} or nil, fs.exists(path) -> boolean, fs.write(path, content) -> boolean, ")
+            append("fs.delete(path) -> boolean. ")
+            if (network) {
+                append("http.get(url), http.post(url, body) and http.request(method, url, body, headers) ")
+                append("return \"HTTP <status>\\n<body>\" and raise an error on failure. ")
+            } else {
+                append("There is no network access. ")
+            }
+            append("Execution times out after 10 seconds.")
+        },
         parametersJson = """{"type":"object","properties":{"code":{"type":"string","description":"Lua source code to execute"}},"required":["code"]}""",
     )
+
+    private fun installFs(globals: Globals) {
+        val fs = LuaTable()
+        fs.set("read", object : OneArgFunction() {
+            override fun call(path: LuaValue): LuaValue {
+                val text = ws.read(path.checkjstring()) ?: return LuaValue.NIL
+                return LuaValue.valueOf(if (text.length > MAX_BYTES) text.substring(0, MAX_BYTES) else text)
+            }
+        })
+        fs.set("exists", object : OneArgFunction() {
+            override fun call(path: LuaValue): LuaValue {
+                val p = path.checkjstring()
+                return LuaValue.valueOf(ws.read(p) != null || ws.ls(p) != null)
+            }
+        })
+        fs.set("ls", object : OneArgFunction() {
+            override fun call(path: LuaValue): LuaValue {
+                val entries = ws.ls(path.optjstring("") ?: "") ?: return LuaValue.NIL
+                val list = LuaTable()
+                entries.forEachIndexed { i, e ->
+                    val row = LuaTable()
+                    row.set("name", LuaValue.valueOf(e.name))
+                    row.set("dir", LuaValue.valueOf(e.isDir))
+                    row.set("size", LuaValue.valueOf(e.size.toDouble()))
+                    list.set(i + 1, row)
+                }
+                return list
+            }
+        })
+        fs.set("write", object : TwoArgFunction() {
+            override fun call(path: LuaValue, content: LuaValue): LuaValue =
+                LuaValue.valueOf(ws.write(path.checkjstring(), content.checkjstring()))
+        })
+        fs.set("delete", object : OneArgFunction() {
+            override fun call(path: LuaValue): LuaValue = LuaValue.valueOf(ws.delete(path.checkjstring()))
+        })
+        globals.set("fs", fs)
+    }
+
+    private fun installHttp(globals: Globals, fetcher: HttpFetcher) {
+        fun request(method: String, url: String, body: String?, headers: Map<String, String>): LuaValue =
+            try {
+                LuaValue.valueOf(runBlocking { fetcher.fetch(url, method, headers, body) }.take(MAX_BYTES))
+            } catch (t: Throwable) {
+                throw LuaError("http error: ${t.message}")
+            }
+        val http = LuaTable()
+        http.set("get", object : OneArgFunction() {
+            override fun call(url: LuaValue): LuaValue = request("GET", url.checkjstring(), null, emptyMap())
+        })
+        http.set("post", object : TwoArgFunction() {
+            override fun call(url: LuaValue, body: LuaValue): LuaValue =
+                request("POST", url.checkjstring(), body.checkjstring(), emptyMap())
+        })
+        http.set("request", object : VarArgFunction() {
+            override fun invoke(args: Varargs): Varargs {
+                val headers = mutableMapOf<String, String>()
+                val table = args.arg(4)
+                if (table.istable()) {
+                    var k: LuaValue = LuaValue.NIL
+                    while (true) {
+                        val n = table.next(k)
+                        k = n.arg1()
+                        if (k.isnil()) break
+                        headers[k.tojstring()] = n.arg(2).tojstring()
+                    }
+                }
+                val body = args.arg(3).takeIf { !it.isnil() }?.tojstring()
+                return request(args.checkjstring(1).uppercase(), args.checkjstring(2), body, headers)
+            }
+        })
+        globals.set("http", http)
+    }
 
     override suspend fun invoke(argsJson: String): ToolResult {
         val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
@@ -379,15 +494,29 @@ class RunLuaTool : Tool {
 
             val thread = Thread {
                 try {
-                    val globals = JsePlatform.standardGlobals()
-                    globals.set("io", LuaValue.NIL)
-                    globals.set("os", LuaValue.NIL)
+                    // Allowlist, not JsePlatform.standardGlobals() minus a few names: that preset also
+                    // loads `luajava` (a bridge to any Java class, i.e. the app's whole process,
+                    // including every project's folder grant) and `debug`.
+                    val globals = Globals()
+                    globals.load(BaseLib())
+                    // The other libs register themselves in package.loaded, so it must exist
+                    // while they load; it is removed again below.
+                    globals.load(PackageLib())
+                    globals.load(TableLib())
+                    globals.load(StringLib())
+                    globals.load(Bit32Lib())
+                    globals.load(CoroutineLib())
+                    globals.load(JseMathLib())
+                    LoadState.install(globals)
+                    LuaC.install(globals)
+                    // Module and file-loading entry points have no place in a sandbox.
                     globals.set("package", LuaValue.NIL)
                     globals.set("require", LuaValue.NIL)
                     globals.set("dofile", LuaValue.NIL)
                     globals.set("loadfile", LuaValue.NIL)
                     globals.set("print", object : VarArgFunction() {
                         override fun invoke(args: Varargs): Varargs {
+                            if (output.length >= MAX_BYTES) return LuaValue.NONE
                             for (i in 1..args.narg()) {
                                 if (i > 1) output.append('\t')
                                 output.append(args.arg(i).tojstring())
@@ -396,6 +525,8 @@ class RunLuaTool : Tool {
                             return LuaValue.NONE
                         }
                     })
+                    installFs(globals)
+                    if (network) installHttp(globals, fetcher!!)
                     globals.load(code, "agent").call()
                     val out = output.toString().trimEnd()
                     result = ToolResult(if (out.isEmpty()) "(no output)" else out)
@@ -407,8 +538,9 @@ class RunLuaTool : Tool {
             thread.start()
             thread.join(10_000L)
             if (thread.isAlive) {
+                // Thread.stop() is unsupported on newer Android; the daemon thread is just abandoned.
                 @Suppress("DEPRECATION")
-                thread.stop()
+                runCatching { thread.stop() }
                 ToolResult("lua error: execution timed out after 10 seconds", isError = true)
             } else {
                 result ?: ToolResult("lua error: unknown error", isError = true)

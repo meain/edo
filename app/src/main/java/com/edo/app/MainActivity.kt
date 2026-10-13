@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -24,7 +25,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 import androidx.core.content.IntentCompat
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import androidx.navigation.navArgument
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.dialog
 import androidx.navigation.compose.rememberNavController
@@ -44,6 +47,16 @@ import com.edo.app.ui.threads.ThreadsScreen
 private const val NAV_MS = 200
 
 class MainActivity : ComponentActivity() {
+    private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+            (application as EdoApp).container.pickedFolder.value = uri.toString()
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -91,6 +104,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
         )
         val container = (application as EdoApp).container
+        container.launchFolderPicker = { initial -> folderPicker.launch(initial) }
         // On rotation etc. the original share intent is redelivered; only handle it once.
         if (savedInstanceState == null) {
             handleShareIntent(intent)
@@ -151,6 +165,7 @@ class MainActivity : ComponentActivity() {
                                     container = container,
                                     onOpenSettings = { open("settings") },
                                     onOpenProjects = { open("projects") },
+                                    onOpenProjectsFromBottom = { open("projects?bottom=true") },
                                     onOpenThreads = { panels.open(PanelSide.Left) },
                                     onOpenFiles = { panels.open(PanelSide.Right) },
                                     onOpenSchedules = { open("schedules") },
@@ -160,8 +175,18 @@ class MainActivity : ComponentActivity() {
                         composable("schedules") {
                             SchedulesScreen(container = container, onBack = popBack)
                         }
-                        dialog("projects") {
-                            ProjectsScreen(container = container, onBack = popBack)
+                        dialog(
+                            "projects?bottom={bottom}",
+                            arguments = listOf(navArgument("bottom") {
+                                type = NavType.BoolType
+                                defaultValue = false
+                            }),
+                        ) { entry ->
+                            ProjectsScreen(
+                                container = container,
+                                atBottom = entry.arguments?.getBoolean("bottom") ?: false,
+                                onBack = popBack,
+                            )
                         }
                         composable("settings") {
                             SettingsScreen(container = container, onBack = popBack)

@@ -1,9 +1,6 @@
 package com.edo.app.ui.projects
 
-import android.content.Intent
 import android.provider.DocumentsContract
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -47,10 +44,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.AnimatedVisibility
@@ -61,29 +62,34 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.edo.app.AppContainer
 import com.edo.app.data.ProjectEntity
+import com.edo.app.data.WorkspaceScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
+fun ProjectsScreen(container: AppContainer, atBottom: Boolean = false, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val projects by container.db.projects().observeAll().collectAsState(initial = emptyList())
     val activeId by container.activeProjectId.collectAsState()
-    var showCreate by remember { mutableStateOf(false) }
+    // The system folder picker stops the activity, which disposes this nav dialog. These must
+    // survive that or the sheet vanishes (with its typed input) when the picker returns.
+    var showCreate by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<ProjectEntity?>(null) }
-    var editing by remember { mutableStateOf<ProjectEntity?>(null) }
+    var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val editing = projects.firstOrNull { it.id == editingId }
 
     Dialog(
         onDismissRequest = onBack,
@@ -98,15 +104,15 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
                     indication = null,
                     onClick = onBack,
                 ),
-            contentAlignment = Alignment.TopCenter,
+            contentAlignment = if (atBottom) Alignment.BottomCenter else Alignment.TopCenter,
         ) {
             AnimatedVisibility(
                 visibleState = visible,
-                enter = slideInVertically(tween(180)) { -it } + fadeIn(tween(180)),
+                enter = slideInVertically(tween(180)) { if (atBottom) it else -it } + fadeIn(tween(180)),
             ) {
                 Surface(
                     modifier = Modifier
-                        .statusBarsPadding()
+                        .then(if (atBottom) Modifier.navigationBarsPadding() else Modifier.statusBarsPadding())
                         .fillMaxWidth()
                         .padding(8.dp)
                         .heightIn(max = 480.dp)
@@ -152,7 +158,7 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
                                             container.setActiveProject(project.id)
                                             onBack()
                                         },
-                                        onEdit = { editing = project },
+                                        onEdit = { editingId = project.id },
                                         onDelete = { confirmDelete = project },
                                     )
                                 }
@@ -177,6 +183,7 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
                             container.db.threads().deleteForProject(project.id)
                             container.scheduler.deleteForProject(project.id)
                             container.db.projects().delete(project)
+                            container.releaseGrant(project.workspaceUri)
                             if (activeId == project.id) container.setActiveProject(-1L)
                         }
                         confirmDelete = null
@@ -214,15 +221,15 @@ fun ProjectsScreen(container: AppContainer, onBack: () -> Unit) {
     editing?.let { proj ->
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
-            onDismissRequest = { editing = null },
+            onDismissRequest = { editingId = null },
             sheetState = sheetState,
         ) {
             EditProjectSheet(
                 container = container,
                 project = proj,
-                onDone = { editing = null },
+                onDone = { editingId = null },
                 onDeleteRequest = {
-                    editing = null
+                    editingId = null
                     confirmDelete = proj
                 },
             )
@@ -317,6 +324,34 @@ private fun ProjectRow(
 
 const val WORKSPACE_BASE = "/sdcard/Edo"
 
+private fun overlapMessage(other: ProjectEntity) =
+    "That folder overlaps \"${other.name}\". Projects can't share or nest folders, so each only sees its own files."
+
+@Composable
+private fun FolderError(message: String?) {
+    if (message == null) return
+    Spacer(Modifier.height(6.dp))
+    Text(message, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+}
+
+/**
+ * New-project form state. Lives in a ViewModel because the system folder picker stops the
+ * activity, which disposes the projects dialog and would otherwise wipe what was typed.
+ */
+class NewProjectForm : ViewModel() {
+    val name = mutableStateOf("")
+    val description = mutableStateOf("")
+    val workspaceUri = mutableStateOf("")
+    val yoloMode = mutableStateOf(false)
+
+    fun reset() {
+        name.value = ""
+        description.value = ""
+        workspaceUri.value = ""
+        yoloMode.value = false
+    }
+}
+
 @Composable
 private fun CreateProjectSheet(
     container: AppContainer,
@@ -324,22 +359,25 @@ private fun CreateProjectSheet(
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
-    var name by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var workspaceUri by remember { mutableStateOf("") }
-    var yoloMode by remember { mutableStateOf(false) }
+    val form: NewProjectForm = viewModel()
+    var name by form.name
+    var description by form.description
+    var workspaceUri by form.workspaceUri
+    var yoloMode by form.yoloMode
 
-    val pickFolder = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-            )
-            workspaceUri = uri.toString()
+    var folderError by remember { mutableStateOf<String?>(null) }
+    val picked by container.pickedFolder.collectAsState()
+    LaunchedEffect(picked) {
+        val uri = picked ?: return@LaunchedEffect
+        container.pickedFolder.value = null
+        val clash = WorkspaceScope.conflict(uri, container.db.projects().observeAll().first())
+        if (clash == null) {
+            folderError = null
+            workspaceUri = uri
+        } else {
+            folderError = overlapMessage(clash)
+            container.releaseGrant(uri)
         }
     }
 
@@ -379,7 +417,7 @@ private fun CreateProjectSheet(
         Spacer(Modifier.height(12.dp))
         if (workspaceUri.isEmpty()) {
             OutlinedButton(
-                onClick = { keyboard?.hide(); pickFolder.launch(edoFolderUri) },
+                onClick = { keyboard?.hide(); container.launchFolderPicker(edoFolderUri) },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Filled.Folder, null, Modifier.padding(end = 8.dp))
@@ -394,7 +432,7 @@ private fun CreateProjectSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { keyboard?.hide(); pickFolder.launch(edoFolderUri) }
+                        .clickable { keyboard?.hide(); container.launchFolderPicker(edoFolderUri) }
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -407,11 +445,12 @@ private fun CreateProjectSheet(
                 }
             }
         }
+        FolderError(folderError)
         Spacer(Modifier.height(16.dp))
         YoloRow(yoloMode = yoloMode, onChange = { yoloMode = it })
         Spacer(Modifier.height(20.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = { form.reset(); onDismiss() }) { Text("Cancel") }
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = {
@@ -424,6 +463,7 @@ private fun CreateProjectSheet(
                                 yoloMode = yoloMode,
                             )
                         )
+                        form.reset()
                         onCreated(id)
                     }
                 },
@@ -460,30 +500,34 @@ private fun EditProjectSheet(
     onDeleteRequest: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
-    var name by remember(project.id) { mutableStateOf(project.name) }
-    var description by remember(project.id) { mutableStateOf(project.description) }
-    var yoloMode by remember(project.id) { mutableStateOf(project.yoloMode) }
-    var workspaceUri by remember(project.id) { mutableStateOf(project.workspaceUri) }
+    var name by rememberSaveable(project.id) { mutableStateOf(project.name) }
+    var description by rememberSaveable(project.id) { mutableStateOf(project.description) }
+    var yoloMode by rememberSaveable(project.id) { mutableStateOf(project.yoloMode) }
+    var luaNetwork by rememberSaveable(project.id) { mutableStateOf(project.luaNetwork) }
+    var workspaceUri by rememberSaveable(project.id) { mutableStateOf(project.workspaceUri) }
     val global = remember { container.settings.load() }
-    var overrideOn by remember(project.id) {
+    var overrideOn by rememberSaveable(project.id) {
         mutableStateOf(project.modelOverride != null || project.maxTurnsOverride != null)
     }
-    var modelText by remember(project.id) { mutableStateOf(project.modelOverride ?: global.model) }
-    var maxTurnsText by remember(project.id) {
+    var modelText by rememberSaveable(project.id) { mutableStateOf(project.modelOverride ?: global.model) }
+    var maxTurnsText by rememberSaveable(project.id) {
         mutableStateOf((project.maxTurnsOverride ?: global.maxTurns).toString())
     }
 
-    val pickFolder = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-            )
-            workspaceUri = uri.toString()
+    var folderError by remember { mutableStateOf<String?>(null) }
+    val picked by container.pickedFolder.collectAsState()
+    LaunchedEffect(picked) {
+        val uri = picked ?: return@LaunchedEffect
+        container.pickedFolder.value = null
+        val others = container.db.projects().observeAll().first().filter { it.id != project.id }
+        val clash = WorkspaceScope.conflict(uri, others)
+        if (clash == null) {
+            folderError = null
+            workspaceUri = uri
+        } else {
+            folderError = overlapMessage(clash)
+            container.releaseGrant(uri)
         }
     }
 
@@ -527,7 +571,7 @@ private fun EditProjectSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { keyboard?.hide(); pickFolder.launch(edoFolderUri) }
+                    .clickable { keyboard?.hide(); container.launchFolderPicker(edoFolderUri) }
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -539,8 +583,24 @@ private fun EditProjectSheet(
                 }
             }
         }
+        FolderError(folderError)
         Spacer(Modifier.height(16.dp))
         YoloRow(yoloMode = yoloMode, onChange = { yoloMode = it })
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Lua network access", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Let Lua scripts make HTTP requests. Lua can always compute and use this project's files",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.Switch(checked = luaNetwork, onCheckedChange = { luaNetwork = it })
+        }
         Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -590,11 +650,13 @@ private fun EditProjectSheet(
                                 name = name.trim().ifBlank { project.name },
                                 description = description.trim(),
                                 yoloMode = yoloMode,
+                                luaNetwork = luaNetwork,
                                 workspaceUri = workspaceUri,
                                 modelOverride = if (overrideOn) modelText.trim().ifBlank { null } else null,
                                 maxTurnsOverride = if (overrideOn) maxTurnsText.toIntOrNull()?.takeIf { it > 0 } else null,
                             )
                         )
+                        if (workspaceUri != project.workspaceUri) container.releaseGrant(project.workspaceUri)
                         onDone()
                     }
                 },

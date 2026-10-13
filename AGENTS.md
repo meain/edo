@@ -5,7 +5,7 @@ Claude-Code-style agent app for Android. Kotlin + Jetpack Compose, Material 3 wi
 ## Architecture
 
 - `app/src/main/java/com/edo/app/`
-  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`; currently v6), encrypted prefs for API key/provider/model/active IDs
+  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`; currently v7), encrypted prefs for API key/provider/model/active IDs
   - `llm/` — `AnthropicClient`, `OpenAIClient`, shared `LlmClient` + streaming `LlmEvent` types
   - `agent/` — `Agent` loop, `ApprovalGate`, tool implementations (see Tools below), `SafWorkspace` / `FileWorkspace` / `InMemoryWorkspace`
   - `schedule/` — scheduled prompts: `ScheduleManager` (save/run/re-arm), `Recurrence` (next-run maths), `ScheduleReceiver` (alarm + boot/time broadcasts), `ScheduleNotifier`
@@ -39,7 +39,7 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 | `ask_user` | Ask the user a question with predefined options or freetext |
 | `calculator` | Evaluate math expressions (supports +, -, *, /, ^, sqrt, sin, cos, tan, log, ln, exp, etc.) |
 | `load_skill` | Load a skill Markdown file from `.agents/skills/` |
-| `run_lua` | Run a sandboxed Lua 5.2 program (math/string/table only, no file or network access) |
+| `run_lua` | Run a sandboxed Lua 5.2 program. Always on. Besides computation it has `fs.read/ls/exists/write/delete` backed by the project `Workspace` (so scoped exactly like the file tools) and, only when the project enables it (`ProjectEntity.luaNetwork`, off by default; DB column `lua_enabled`; toggle in Edit project), `http.get/post/request`. Globals are an allowlist (base, table, string, bit32, coroutine, math) — never `JsePlatform.standardGlobals()`, which exposes `luajava` (a bridge to any Java class, so to every project's folder grant) and `debug` |
 | `schedule` | Create, list, get, update, delete, enable, disable scheduled prompts for the current project (not offered to scheduled runs) |
 
 ## Agent loop
@@ -92,11 +92,25 @@ adb -s 192.168.1.3:38181 exec-out screencap -p > /tmp/edo.png
 adb -s 192.168.1.3:38181 shell uiautomator dump /sdcard/window.xml   # then `cat | tr '>' '\n' | grep text=` to find tap coords
 ```
 
+**Use Haiku subagents (`model: haiku`) for testing.** Run the test steps through one, and keep builds, installs and judging the results in the main session.
+
+Delegate on-device navigation (tapping through screens, typing a prompt, scrolling a chat and reading tool results, screenshots) to a Haiku subagent (`model: haiku`). It has handled both reading a long chat transcript and launching, typing, sending and reading results. Give it the device id, the exact `adb` commands (nested quoting for `input text`, `%s` for spaces), the project it may touch, and tell it not to modify anything beyond the task. Keep builds, installs and judging the results in the main session.
+
 The wireless port changes every time wireless debugging is toggled; expect to re-discover via `adb mdns services` or fall back to USB pairing. The device also shows up under its mDNS id (`adb-<serial>._adb-tls-connect._tcp`, see `adb devices`), which keeps working when the IP:port rotates.
 
 ## Workspace files
 
 All project workspaces live under `/sdcard/Edo/<name>` on the device. The SAF picker pre-navigates there. The app holds only the per-folder `OpenDocumentTree` grant — no `MANAGE_EXTERNAL_STORAGE`. Permissions don't always survive reinstalls; the user may need to re-pick the folder.
+
+### Per-project scoping
+
+Each project's agent must only reach its own folder. The OS boundary is the per-folder SAF grant (no broad storage permission); inside the app all grants share one process, so the rest is enforced in code:
+
+- Tool paths are relative to the workspace root; `.`/`..` segments are rejected (`WorkspaceScope.safeSegments`) and `FileWorkspace` compares canonical paths with a separator so a sibling like `Bubbly-secret` isn't "inside" `Bubbly`.
+- A project's folder may not equal, contain, or sit inside another project's folder (`WorkspaceScope.overlaps`, checked when picking in the create/edit sheets). Picking the parent `Edo` folder would hand that project every sibling.
+- Grants are released when a project is deleted or its folder changes, and grants no project points at are dropped at startup (`AppContainer.releaseGrant` / `releaseOrphanGrants`).
+- `run_lua` has no Java bridge, `io` or `os`; its only file access is `fs.*` over the project's `Workspace`, and network is a per-project opt-in (see Tools). `RunLuaSandboxTest` and `WorkspaceScopeTest` guard these.
+- The folder picker is registered on `MainActivity` (`AppContainer.launchFolderPicker` / `pickedFolder`), not in the sheets: it stops the activity, which disposes the projects dialog, so a callback registered there is lost. New-project form state lives in `NewProjectForm` (a ViewModel) for the same reason.
 
 ## Notes
 
@@ -108,4 +122,4 @@ All project workspaces live under `/sdcard/Edo/<name>` on the device. The SAF pi
 - `SwipePanels` drives both edge panels from one horizontal `draggable` on the chat route, so a child that consumes horizontal drags (code blocks, lists) wins. The chats panel stays composed offscreen to avoid a first-frame hitch; the files panel is composed on demand. The panels replaced the old `threads` / `files` nav routes.
 - Pulling up past the end of a conversation (`ChatScreen`, nested scroll) suggests a new chat; the pull is resisted 2:1 and disabled while the agent runs.
 - Bare URLs are linkified by commonmark's autolink extension, then rendered like `[text](url)` links.
-- Room uses explicit migrations (3→4 … 5→6) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.
+- Room uses explicit migrations (3→4 … 6→7) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.

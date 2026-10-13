@@ -56,6 +56,7 @@ import androidx.compose.foundation.Image as ComposeImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.widthIn
@@ -195,6 +196,7 @@ fun ChatScreen(
     container: AppContainer,
     onOpenSettings: () -> Unit,
     onOpenProjects: () -> Unit,
+    onOpenProjectsFromBottom: () -> Unit,
     onOpenThreads: () -> Unit,
     onOpenFiles: () -> Unit,
     onOpenSchedules: () -> Unit,
@@ -219,7 +221,7 @@ fun ChatScreen(
     val slashMatches = if (slashQuery == null) emptyList()
     else skills.filter { it.name.contains(slashQuery, ignoreCase = true) }
     var pendingImages by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    var pendingTextFile by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingTextFiles by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     val expandedToolIds = remember { mutableStateMapOf<String, Boolean>() }
     var viewingImage by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
 
@@ -230,7 +232,7 @@ fun ChatScreen(
         for (uri in uris) {
             when (val attachment = readAttachment(context.contentResolver, uri)) {
                 is Attachment.Image -> pendingImages = pendingImages + (attachment.mediaType to attachment.base64)
-                is Attachment.Text -> pendingTextFile = attachment.name to attachment.content
+                is Attachment.Text -> pendingTextFiles = pendingTextFiles + (attachment.name to attachment.content)
                 null -> anyUnsupported = true
             }
         }
@@ -255,7 +257,7 @@ fun ChatScreen(
             }
             when (attachment) {
                 is Attachment.Image -> pendingImages = pendingImages + (attachment.mediaType to attachment.base64)
-                is Attachment.Text -> pendingTextFile = attachment.name to attachment.content
+                is Attachment.Text -> pendingTextFiles = pendingTextFiles + (attachment.name to attachment.content)
                 null -> anyUnsupported = true
             }
         }
@@ -499,8 +501,25 @@ fun ChatScreen(
                 if (state.needsProject) {
                     NoProjectPlaceholder(onOpenProjects = onOpenProjects)
                 } else if (state.messages.isEmpty() && state.streamingText.isEmpty() && !state.running) {
+                    // Dragging down on an empty chat opens the project switcher, at the bottom in thumb reach.
+                    val openProjectsDragPx = with(density) { 96.dp.toPx() }
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                var dragged = 0f
+                                detectVerticalDragGestures(
+                                    onDragStart = { dragged = 0f },
+                                    onDragEnd = { dragged = 0f },
+                                    onDragCancel = { dragged = 0f },
+                                ) { _, dy ->
+                                    dragged += dy
+                                    if (dragged >= openProjectsDragPx) {
+                                        dragged = 0f
+                                        onOpenProjectsFromBottom()
+                                    }
+                                }
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
                         Column(
@@ -708,11 +727,11 @@ fun ChatScreen(
                             onRemove = { pendingImages = emptyList() },
                         )
                     }
-                    pendingTextFile?.let { (filename, content) ->
+                    pendingTextFiles.forEachIndexed { index, (filename, content) ->
                         AttachmentChip(
                             icon = Icons.AutoMirrored.Filled.InsertDriveFile,
                             label = "$filename · ${content.length} chars",
-                            onRemove = { pendingTextFile = null },
+                            onRemove = { pendingTextFiles = pendingTextFiles.filterIndexed { i, _ -> i != index } },
                         )
                     }
                     Row(
@@ -763,9 +782,9 @@ fun ChatScreen(
                                 disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                             ),
                         )
-                        val hasContent = input.isNotBlank() || pendingImages.isNotEmpty() || pendingTextFile != null
+                        val hasContent = input.isNotBlank() || pendingImages.isNotEmpty() || pendingTextFiles.isNotEmpty()
                         val composed = buildString {
-                            pendingTextFile?.let { (filename, content) ->
+                            for ((filename, content) in pendingTextFiles) {
                                 append(attachedFileBlock(filename, content))
                             }
                             append(input.trim())
@@ -777,7 +796,7 @@ fun ChatScreen(
                                     vm.queueMessage(composed.trim(), pendingImages)
                                     setInput("")
                                     pendingImages = emptyList()
-                                    pendingTextFile = null
+                                    pendingTextFiles = emptyList()
                                 },
                                 modifier = Modifier.padding(bottom = 2.dp),
                             ) {
@@ -809,7 +828,7 @@ fun ChatScreen(
                                             vm.sendUserMessage(composed.trim(), pendingImages)
                                             setInput("")
                                             pendingImages = emptyList()
-                                            pendingTextFile = null
+                                            pendingTextFiles = emptyList()
                                         }
                                     },
                             ) {
