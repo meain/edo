@@ -376,7 +376,8 @@ fun ChatScreen(
                     continue
                 }
                 if (msg.role != Role.Assistant) continue
-                if (msg.blocks.any { it is Block.Text }) add(ChatItem.Msg(msg))
+                // Models often emit "\n\n" before a tool call; that is not a message and must not split a tool group.
+                if (msg.blocks.any { it is Block.Text && it.text.isNotBlank() }) add(ChatItem.Msg(msg))
                 val uses = msg.blocks.filterIsInstance<Block.ToolUse>()
                 if (uses.isNotEmpty()) {
                     val last = lastOrNull()
@@ -1233,7 +1234,7 @@ private fun MessageBubble(
         }
 
         Role.Assistant -> {
-            val textBlocks = msg.blocks.filterIsInstance<Block.Text>()
+            val textBlocks = msg.blocks.filterIsInstance<Block.Text>().filter { it.text.isNotBlank() }
             // Tool calls are rendered separately (see ToolGroup) so consecutive ones can fold together.
             if (textBlocks.isNotEmpty()) {
                 AssistantBubble(
