@@ -259,7 +259,8 @@ class DateTimeTool(private val clock: () -> Long = System::currentTimeMillis) : 
 }
 
 class AskUserQuestionTool(
-    private val ask: suspend (question: String, options: List<String>) -> String,
+    /** Returns the user's answer, or null if they dismissed the question. */
+    private val ask: suspend (question: String, options: List<String>) -> String?,
 ) : Tool {
     override val spec = ToolSpec(
         name = "ask_user",
@@ -276,6 +277,11 @@ class AskUserQuestionTool(
         }.getOrElse { return ToolResult("'options' must be an array of strings", isError = true) }
         if (options.isEmpty()) return ToolResult("'options' must not be empty", isError = true)
         val answer = ask(question, options)
+            ?: return ToolResult(
+                "The user dismissed the question without answering. Continue without it, make a reasonable " +
+                    "assumption, or stop and say what you need.",
+                isError = true,
+            )
         return ToolResult(answer)
     }
 }

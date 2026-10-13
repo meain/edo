@@ -40,7 +40,8 @@ data class PendingQuestion(
     val id: String,
     val question: String,
     val options: List<String>,
-    val deferred: CompletableDeferred<String>,
+    /** Completes with the answer, or null if the user dismissed the question. */
+    val deferred: CompletableDeferred<String?>,
 )
 
 data class QueuedMessage(
@@ -144,6 +145,8 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
     fun approve(decision: ApprovalDecision) = active?.approve(decision)
 
     fun answerQuestion(answer: String) = active?.answerQuestion(answer)
+
+    fun dismissQuestion() = active?.dismissQuestion()
 
     fun dismissError() = active?.dismissError()
 

@@ -126,6 +126,11 @@ class ChatSession internal constructor(
         _state.value.pendingQuestion?.deferred?.complete(answer)
     }
 
+    /** The user closed the question without answering; the tool call fails and the run continues. */
+    fun dismissQuestion() {
+        _state.value.pendingQuestion?.deferred?.complete(null)
+    }
+
     fun dismissError() = _state.update { it.copy(error = null) }
 
     /** Re-run the agent against the current conversation (after all auto-retries exhausted). */
@@ -317,9 +322,9 @@ class ChatSession internal constructor(
             return
         }
         val ws = workspaceFor(project)
-        val askUser: suspend (String, List<String>) -> String = ask@{ question, options ->
+        val askUser: suspend (String, List<String>) -> String? = ask@{ question, options ->
             if (unattended) return@ask "No user is available (scheduled run). Make your best judgment and continue."
-            val deferred = CompletableDeferred<String>()
+            val deferred = CompletableDeferred<String?>()
             val id = "question_${System.currentTimeMillis()}"
             _state.update { it.copy(pendingQuestion = PendingQuestion(id, question, options, deferred)) }
             try { deferred.await() } finally {

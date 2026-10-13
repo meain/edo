@@ -830,7 +830,8 @@ fun ChatScreen(
         val focusRequester = remember(pendingQuestion.id) { FocusRequester() }
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
-            onDismissRequest = { /* non-dismissible — must pick an option */ },
+            // Swipe-down / scrim tap / back counts as declining: the tool call fails and the run goes on.
+            onDismissRequest = { vm.dismissQuestion() },
             sheetState = sheetState,
         ) {
             Column(
