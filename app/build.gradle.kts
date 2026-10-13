@@ -88,6 +88,7 @@ dependencies {
     implementation(libs.commonmark.ext.tables)
     implementation(libs.commonmark.ext.strikethrough)
     implementation(libs.commonmark.ext.task.list)
+    implementation(libs.commonmark.ext.autolink)
 
     implementation(libs.luaj.jse)
     implementation(libs.androidx.security.crypto)

@@ -39,6 +39,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.commonmark.ext.autolink.AutolinkExtension
 import org.commonmark.ext.gfm.strikethrough.Strikethrough
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TableBlock
@@ -71,6 +72,8 @@ import org.commonmark.node.Text as MdText
 private val markdownParser: Parser = Parser.builder()
     .extensions(
         listOf(
+            // Turns bare URLs / emails into Link nodes, so they render clickable like [text](url).
+            AutolinkExtension.create(),
             TablesExtension.create(),
             StrikethroughExtension.create(),
             TaskListItemsExtension.create(),
