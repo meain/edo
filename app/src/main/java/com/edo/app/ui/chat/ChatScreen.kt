@@ -139,6 +139,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -296,6 +297,20 @@ fun ChatScreen(
         }
     }
     LaunchedEffect(state.currentThread?.id) { followTail = true }
+
+    // A fresh chat opens with the keyboard up, so launching the app goes straight to typing.
+    // Existing chats are left alone (reopening one shouldn't pop the keyboard over what you read).
+    val inputFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val isNewChat = state.currentProject != null && state.currentThread == null && state.messages.isEmpty()
+    LaunchedEffect(isNewChat, state.currentProject?.id) {
+        if (!isNewChat) return@LaunchedEffect
+        // On a cold start the window isn't focused for the first moments; asking too early
+        // focuses the field but never shows the keyboard.
+        kotlinx.coroutines.delay(250)
+        runCatching { inputFocus.requestFocus() }
+        keyboard?.show()
+    }
 
     // Pulling up past the very end of the conversation suggests (and, on release, starts) a new chat.
     val density = LocalDensity.current
@@ -735,7 +750,7 @@ fun ChatScreen(
                         TextField(
                             value = inputField.value,
                             onValueChange = { inputField.value = it },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).focusRequester(inputFocus),
                             placeholder = { Text("Message…") },
                             maxLines = 6,
                             shape = RoundedCornerShape(24.dp),
