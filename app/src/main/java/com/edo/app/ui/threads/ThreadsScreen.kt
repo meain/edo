@@ -123,10 +123,10 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
                 reverseLayout = true,
                 contentPadding = PaddingValues(bottom = 8.dp),
             ) {
-                // Search shows everything; otherwise chats idle for 3+ days fold behind a header.
-                val cutoff = System.currentTimeMillis() - FOLD_AFTER_MS
+                // Search shows everything; otherwise only the newest chats show and the rest
+                // fold behind a header (threads arrive newest-first).
                 val (recent, older) =
-                    if (trimmedQuery.isEmpty()) threads.partition { it.lastUpdatedAt >= cutoff }
+                    if (trimmedQuery.isEmpty()) threads.take(MAX_VISIBLE_CHATS) to threads.drop(MAX_VISIBLE_CHATS)
                     else threads to emptyList()
                 val visible = if (showOlder) recent + older else recent
                 items(visible, key = { it.id }) { thread ->
@@ -263,7 +263,7 @@ private fun ThreadRow(
 }
 
 private const val SCHEDULED_PREFIX = "⏰ "
-private const val FOLD_AFTER_MS = 3L * 24 * 60 * 60 * 1000
+private const val MAX_VISIBLE_CHATS = 15
 
 /** Escapes LIKE wildcards so the query matches literally (pairs with `ESCAPE '\'`). */
 private fun escapeLike(s: String): String =
