@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
@@ -62,6 +63,7 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
     val activeProjectId by container.activeProjectId.collectAsState()
     val activeThreadId by container.activeThreadId.collectAsState()
     var query by remember { mutableStateOf("") }
+    var showOlder by remember { mutableStateOf(false) }
     val trimmedQuery = query.trim()
     val threadsFlow = remember(activeProjectId, trimmedQuery) {
         when {
@@ -121,7 +123,13 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
                 reverseLayout = true,
                 contentPadding = PaddingValues(bottom = 8.dp),
             ) {
-                items(threads, key = { it.id }) { thread ->
+                // Search shows everything; otherwise chats idle for 3+ days fold behind a header.
+                val cutoff = System.currentTimeMillis() - FOLD_AFTER_MS
+                val (recent, older) =
+                    if (trimmedQuery.isEmpty()) threads.partition { it.lastUpdatedAt >= cutoff }
+                    else threads to emptyList()
+                val visible = if (showOlder) recent + older else recent
+                items(visible, key = { it.id }) { thread ->
                     ThreadRow(
                         thread = thread,
                         isActive = thread.id == activeThreadId,
@@ -131,6 +139,21 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
                         },
                         onDelete = { confirmDelete = thread },
                     )
+                }
+                // Reversed layout: the last item sits at the top, above the oldest chats.
+                if (older.isNotEmpty()) {
+                    item(key = "older-header") {
+                        TextButton(
+                            onClick = { showOlder = !showOlder },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                (if (showOlder) "Hide" else "Show") + " ${older.size} older chat" +
+                                    if (older.size == 1) "" else "s",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -203,16 +226,18 @@ private fun ThreadRow(
                 .padding(start = 12.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Scheduled runs are titled "⏰ title · time" (see ScheduleManager).
+            val scheduled = thread.title.startsWith(SCHEDULED_PREFIX)
             Icon(
-                Icons.AutoMirrored.Filled.Chat,
-                contentDescription = null,
+                if (scheduled) Icons.Filled.Alarm else Icons.AutoMirrored.Filled.Chat,
+                contentDescription = if (scheduled) "Scheduled chat" else null,
                 modifier = Modifier.size(18.dp),
                 tint = if (isActive) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = thread.title,
+                text = if (scheduled) thread.title.removePrefix(SCHEDULED_PREFIX) else thread.title,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
@@ -236,6 +261,9 @@ private fun ThreadRow(
         }
     }
 }
+
+private const val SCHEDULED_PREFIX = "⏰ "
+private const val FOLD_AFTER_MS = 3L * 24 * 60 * 60 * 1000
 
 /** Escapes LIKE wildcards so the query matches literally (pairs with `ESCAPE '\'`). */
 private fun escapeLike(s: String): String =
