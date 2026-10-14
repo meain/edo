@@ -209,7 +209,10 @@ fun ChatScreen(
     val state by vm.state.collectAsState()
     // The field is backed by a TextFieldValue so programmatic edits (skill picker, shared
     // text) can put the cursor at the end; `input` is the plain-string view of it.
-    val inputField = remember { mutableStateOf(TextFieldValue("")) }
+    // rememberSaveable so a draft survives leaving the screen (settings, schedules) and process death.
+    val inputField = androidx.compose.runtime.saveable.rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
     val input = inputField.value.text
     fun setInput(value: String) {
         if (value != inputField.value.text) inputField.value = TextFieldValue(value, TextRange(value.length))
