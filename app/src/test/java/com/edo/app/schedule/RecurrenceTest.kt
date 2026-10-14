@@ -66,4 +66,18 @@ class RecurrenceTest {
     fun onceHasNoFollowUp() {
         assertNull(nextRunAfter(sched(ScheduleKind.ONCE), 0L, zone))
     }
+
+    @Test
+    fun monthlyClampsToLastDayOfShortMonth() {
+        val s = sched(ScheduleKind.MONTHLY).copy(dayOfMonth = 31)
+        // 31 Oct slot has passed; November has 30 days.
+        val next = nextRunAfter(s, at("2026-10-31T10:00:00+01:00"), zone)
+        assertEquals(at("2026-11-30T09:00:00+01:00"), next)
+    }
+
+    @Test
+    fun monthlyBeforeThisMonthsSlotRunsThisMonth() {
+        val s = sched(ScheduleKind.MONTHLY).copy(dayOfMonth = 15)
+        assertEquals(at("2026-10-15T09:00:00+02:00"), nextRunAfter(s, at("2026-10-12T08:00:00+02:00"), zone))
+    }
 }

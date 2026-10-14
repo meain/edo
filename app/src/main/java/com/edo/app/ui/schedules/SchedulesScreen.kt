@@ -308,6 +308,7 @@ private fun ScheduleEditor(
     var minuteOfDay by remember { mutableIntStateOf(existing?.minuteOfDay ?: (9 * 60)) }
     var daysMask by remember { mutableIntStateOf(existing?.daysMask ?: 0b0011111) }
     var intervalText by remember { mutableStateOf((existing?.intervalMinutes ?: 60).toString()) }
+    var dayText by remember { mutableStateOf((existing?.dayOfMonth ?: 1).toString()) }
     // For ONCE: the target instant; defaults to the next top of the hour.
     var onceAt by remember {
         mutableLongStateOf(
@@ -320,7 +321,9 @@ private fun ScheduleEditor(
     val zone = ZoneId.systemDefault()
 
     val interval = intervalText.toIntOrNull() ?: 0
+    val dayOfMonth = dayText.toIntOrNull() ?: 0
     val valid = prompt.isNotBlank() && when (kind) {
+        ScheduleKind.MONTHLY -> dayOfMonth in 1..31
         ScheduleKind.ONCE -> onceAt > System.currentTimeMillis()
         ScheduleKind.INTERVAL -> interval >= MIN_INTERVAL_MINUTES
         ScheduleKind.WEEKLY -> daysMask != 0
@@ -352,6 +355,7 @@ private fun ScheduleEditor(
             for ((k, label) in listOf(
                 ScheduleKind.ONCE to "Once", ScheduleKind.INTERVAL to "Every…",
                 ScheduleKind.DAILY to "Daily", ScheduleKind.WEEKLY to "Weekly",
+                ScheduleKind.MONTHLY to "Monthly",
             )) {
                 FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(label) })
             }
@@ -373,6 +377,19 @@ private fun ScheduleEditor(
                 isError = interval < MIN_INTERVAL_MINUTES,
             )
             ScheduleKind.DAILY -> OutlinedButton(onClick = { pickTime = true }) { Text("At ${formatMinute(minuteOfDay)}") }
+            ScheduleKind.MONTHLY -> Column {
+                OutlinedTextField(
+                    value = dayText,
+                    onValueChange = { v -> dayText = v.filter { it.isDigit() }.take(2) },
+                    label = { Text("Day of month (1–31; short months use their last day)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = dayOfMonth !in 1..31,
+                )
+                Spacer(Modifier.height(4.dp))
+                OutlinedButton(onClick = { pickTime = true }) { Text("At ${formatMinute(minuteOfDay)}") }
+            }
             ScheduleKind.WEEKLY -> Column {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (day in DayOfWeek.values()) {
@@ -404,6 +421,7 @@ private fun ScheduleEditor(
                             minuteOfDay = minuteOfDay,
                             daysMask = daysMask,
                             intervalMinutes = interval.coerceAtLeast(MIN_INTERVAL_MINUTES),
+                            dayOfMonth = dayOfMonth.coerceIn(1, 31),
                             enabled = true,
                             nextRunAt = if (kind == ScheduleKind.ONCE) onceAt else 0,
                             lastRunAt = existing?.lastRunAt ?: 0,
@@ -461,7 +479,12 @@ private fun ScheduleEditor(
     }
 }
 
-private fun formatMinute(m: Int) = "%02d:%02d".format(m / 60, m % 60)
+private fun ordinal(n: Int): String {
+    val suffix = if (n % 100 in 11..13) "th" else when (n % 10) { 1 -> "st"; 2 -> "nd"; 3 -> "rd"; else -> "th" }
+    return "$n$suffix"
+}
+
+private fun formatMinute(m: Int) ="%02d:%02d".format(m / 60, m % 60)
 
 private fun stamp(epoch: Long) =
     STAMP.format(Instant.ofEpochMilli(epoch).atZone(ZoneId.systemDefault()))
@@ -472,6 +495,7 @@ private fun describe(s: ScheduleEntity): String {
         ScheduleKind.INTERVAL ->
             if (s.intervalMinutes % 60 == 0) "Every ${s.intervalMinutes / 60} h" else "Every ${s.intervalMinutes} min"
         ScheduleKind.DAILY -> "Daily at ${formatMinute(s.minuteOfDay)}"
+        ScheduleKind.MONTHLY -> "Monthly on the ${ordinal(s.dayOfMonth)} at ${formatMinute(s.minuteOfDay)}"
         ScheduleKind.WEEKLY -> {
             val days = when (s.daysMask) {
                 0b0011111 -> "Weekdays"

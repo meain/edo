@@ -148,6 +148,8 @@ data class ScheduleEntity(
     /** Bit 0 = Monday … bit 6 = Sunday, for WEEKLY. */
     @ColumnInfo(name = "days_mask") val daysMask: Int = 0b1111111,
     @ColumnInfo(name = "interval_minutes") val intervalMinutes: Int = 60,
+    /** 1–31, for MONTHLY; months shorter than this run on their last day. */
+    @ColumnInfo(name = "day_of_month") val dayOfMonth: Int = 1,
     @ColumnInfo(name = "enabled") val enabled: Boolean = true,
     @ColumnInfo(name = "next_run_at") val nextRunAt: Long = 0,
     @ColumnInfo(name = "last_run_at") val lastRunAt: Long = 0,
@@ -189,7 +191,7 @@ interface ScheduleDao {
 
 @Database(
     entities = [ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -248,13 +250,20 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v7 → v8: day of month for monthly schedules. */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE schedules ADD COLUMN day_of_month INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }

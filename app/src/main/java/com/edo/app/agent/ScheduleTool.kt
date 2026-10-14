@@ -35,18 +35,20 @@ class ScheduleTool(
             "so make the prompt self-contained. Times are the user's local time; call current_datetime " +
             "first to resolve things like \"tomorrow at 9\". `repeat` is one of: once (needs `date` and " +
             "`time`), interval (needs `every_minutes`, at least $MIN_INTERVAL_MINUTES), daily (needs " +
-            "`time`), weekly (needs `days` and `time`). For update, pass the id plus only the fields to " +
+            "`time`), weekly (needs `days` and `time`), monthly (needs `day_of_month` and `time`; short " +
+            "months run on their last day). For update, pass the id plus only the fields to " +
             "change; get first if you need the current values.",
         parametersJson = """{"type":"object","properties":{
 "action":{"type":"string","enum":["create","list","get","update","delete","enable","disable"]},
 "id":{"type":"integer","description":"Schedule id, for get / update / delete / enable / disable"},
 "title":{"type":"string","description":"Short name shown in the notification"},
 "prompt":{"type":"string","description":"What the scheduled run should do"},
-"repeat":{"type":"string","enum":["once","interval","daily","weekly"]},
+"repeat":{"type":"string","enum":["once","interval","daily","weekly","monthly"]},
 "date":{"type":"string","description":"YYYY-MM-DD, for once"},
 "time":{"type":"string","description":"HH:mm, 24-hour, for once / daily / weekly"},
 "days":{"type":"array","items":{"type":"string"},"description":"mon, tue, wed, thu, fri, sat, sun; for weekly"},
-"every_minutes":{"type":"integer","description":"For interval"}
+"every_minutes":{"type":"integer","description":"For interval"},
+"day_of_month":{"type":"integer","description":"1-31, for monthly"}
 },"required":["action"]}""",
     )
 
@@ -100,7 +102,8 @@ class ScheduleTool(
             "interval" -> ScheduleKind.INTERVAL
             "daily" -> ScheduleKind.DAILY
             "weekly" -> ScheduleKind.WEEKLY
-            else -> fail("'repeat' must be once, interval, daily or weekly")
+            "monthly" -> ScheduleKind.MONTHLY
+            else -> fail("'repeat' must be once, interval, daily, weekly or monthly")
         }
         val prompt = args.text("prompt")?.trim()?.also { if (it.isEmpty()) fail("'prompt' must not be empty") }
             ?: existing?.prompt ?: fail("missing 'prompt'")
@@ -142,6 +145,16 @@ class ScheduleTool(
             if (mask == 0) fail("'days' must not be empty")
         }
 
+        var dayOfMonth = existing?.dayOfMonth ?: 1
+        if (kind == ScheduleKind.MONTHLY) {
+            val given = args["day_of_month"]?.jsonPrimitive?.intOrNull
+            if (given == null && (existing == null || ScheduleKind.from(existing.kind) != ScheduleKind.MONTHLY)) {
+                fail("missing 'day_of_month'")
+            }
+            dayOfMonth = given ?: dayOfMonth
+            if (dayOfMonth !in 1..31) fail("'day_of_month' must be 1-31")
+        }
+
         var runAt = 0L
         if (kind == ScheduleKind.ONCE) {
             val wasOnce = existing != null && ScheduleKind.from(existing.kind) == ScheduleKind.ONCE
@@ -160,6 +173,7 @@ class ScheduleTool(
             minuteOfDay = minuteOfDay,
             daysMask = mask,
             intervalMinutes = interval,
+            dayOfMonth = dayOfMonth,
             nextRunAt = runAt,
             // Editing a schedule that had turned itself off (a finished one-time run) brings it back.
             enabled = true,
@@ -207,6 +221,7 @@ class ScheduleTool(
             ScheduleKind.ONCE -> "once"
             ScheduleKind.INTERVAL -> "every ${s.intervalMinutes} min"
             ScheduleKind.DAILY -> "daily at $time"
+            ScheduleKind.MONTHLY -> "monthly on day ${s.dayOfMonth} at $time"
             ScheduleKind.WEEKLY -> DayOfWeek.values().filter { s.daysMask and (1 shl (it.value - 1)) != 0 }
                 .joinToString(",") { it.getDisplayName(TextStyle.SHORT, Locale.ENGLISH) } + " at $time"
         }

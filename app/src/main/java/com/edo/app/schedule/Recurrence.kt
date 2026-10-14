@@ -10,7 +10,8 @@ enum class ScheduleKind {
     ONCE,
     INTERVAL,
     DAILY,
-    WEEKLY;
+    WEEKLY,
+    MONTHLY;
 
     companion object {
         fun from(name: String): ScheduleKind = entries.firstOrNull { it.name == name } ?: DAILY
@@ -32,7 +33,21 @@ fun nextRunAfter(s: ScheduleEntity, after: Long, zone: ZoneId = ZoneId.systemDef
         ScheduleKind.DAILY -> nextAtTime(s.minuteOfDay, 0b1111111, after, zone)
         ScheduleKind.WEEKLY -> if (s.daysMask and 0b1111111 == 0) null
         else nextAtTime(s.minuteOfDay, s.daysMask, after, zone)
+        ScheduleKind.MONTHLY -> nextMonthly(s.dayOfMonth, s.minuteOfDay, after, zone)
     }
+
+private fun nextMonthly(dayOfMonth: Int, minuteOfDay: Int, after: Long, zone: ZoneId): Long? {
+    val time = LocalTime.of((minuteOfDay / 60).coerceIn(0, 23), (minuteOfDay % 60).coerceIn(0, 59))
+    val first = Instant.ofEpochMilli(after).atZone(zone).toLocalDate().withDayOfMonth(1)
+    for (m in 0L..1L) {
+        val month = first.plusMonths(m)
+        // Short months clamp to their last day (31st → 30th / 28th).
+        val date = month.withDayOfMonth(dayOfMonth.coerceIn(1, month.lengthOfMonth()))
+        val candidate = date.atTime(time).atZone(zone).toInstant().toEpochMilli()
+        if (candidate > after) return candidate
+    }
+    return null
+}
 
 private fun nextAtTime(minuteOfDay: Int, daysMask: Int, after: Long, zone: ZoneId): Long? {
     val time = LocalTime.of((minuteOfDay / 60).coerceIn(0, 23), (minuteOfDay % 60).coerceIn(0, 59))

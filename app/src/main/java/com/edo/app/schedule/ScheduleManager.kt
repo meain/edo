@@ -100,7 +100,7 @@ class ScheduleManager(private val app: Application, private val container: AppCo
             if (!s.enabled) continue
             when {
                 s.nextRunAt in 1..now -> advance(s, now, status = "SKIPPED")
-                ScheduleKind.from(s.kind).let { it == ScheduleKind.DAILY || it == ScheduleKind.WEEKLY } ->
+                ScheduleKind.from(s.kind).let { it != ScheduleKind.ONCE && it != ScheduleKind.INTERVAL } ->
                     dao.update(s.copy(nextRunAt = nextRunAfter(s, now) ?: 0L))
             }
         }
