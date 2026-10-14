@@ -50,6 +50,32 @@ data class OpenRouterOptions(
     val extraJson: String = "",
 )
 
+/** A named, switchable set of connection settings. */
+@Serializable
+data class ModelProfile(
+    val id: Long,
+    val name: String,
+    val provider: String,
+    val baseUrl: String,
+    val apiKey: String,
+    val model: String,
+    val weakModel: String = "",
+    val openRouter: OpenRouterOptions = OpenRouterOptions(),
+)
+
+fun ModelProfile.providerEnum(): Provider = Provider.fromName(provider)
+
+fun AppSettings.toProfile(id: Long, name: String) = ModelProfile(
+    id = id, name = name, provider = provider.name, baseUrl = baseUrl, apiKey = apiKey,
+    model = model, weakModel = weakModel, openRouter = openRouter,
+)
+
+/** These settings with the profile's connection fields applied and the profile marked active. */
+fun AppSettings.withProfile(p: ModelProfile) = copy(
+    provider = p.providerEnum(), baseUrl = p.baseUrl, apiKey = p.apiKey, model = p.model,
+    weakModel = p.weakModel, openRouter = p.openRouter, activeProfileId = p.id,
+)
+
 data class AppSettings(
     val provider: Provider = Provider.Anthropic,
     val baseUrl: String = "https://api.anthropic.com",
@@ -61,6 +87,8 @@ data class AppSettings(
     /** Cheaper model for side tasks (chat titles); blank falls back to [model]. */
     val weakModel: String = "",
     val openRouter: OpenRouterOptions = OpenRouterOptions(),
+    /** The profile last applied or saved, or -1 when the settings are ad hoc. */
+    val activeProfileId: Long = -1L,
 )
 
 /** Settings to use for side tasks such as naming a chat: the weak model if one is set. */
@@ -76,6 +104,8 @@ fun AppSettings.withOverrides(project: ProjectEntity): AppSettings = copy(
 interface SettingsStore {
     fun load(): AppSettings
     fun save(settings: AppSettings)
+    fun loadProfiles(): List<ModelProfile>
+    fun saveProfiles(profiles: List<ModelProfile>)
 }
 
 class EncryptedSettingsStore(context: Context) : SettingsStore {
@@ -105,7 +135,16 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
         openRouter = prefs.getString(KEY_OPENROUTER, null)
             ?.let { runCatching { Json.decodeFromString<OpenRouterOptions>(it) }.getOrNull() }
             ?: OpenRouterOptions(),
+        activeProfileId = prefs.getLong(KEY_ACTIVE_PROFILE_ID, -1L),
     )
+
+    override fun loadProfiles(): List<ModelProfile> = prefs.getString(KEY_PROFILES, null)
+        ?.let { runCatching { Json.decodeFromString<List<ModelProfile>>(it) }.getOrNull() }
+        ?: emptyList()
+
+    override fun saveProfiles(profiles: List<ModelProfile>) {
+        prefs.edit().putString(KEY_PROFILES, Json.encodeToString(profiles)).apply()
+    }
 
     override fun save(settings: AppSettings) {
         prefs.edit()
@@ -118,6 +157,7 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
             .putInt(KEY_MAX_TURNS, settings.maxTurns)
             .putString(KEY_WEAK_MODEL, settings.weakModel)
             .putString(KEY_OPENROUTER, Json.encodeToString(settings.openRouter))
+            .putLong(KEY_ACTIVE_PROFILE_ID, settings.activeProfileId)
             .apply()
     }
 
@@ -131,11 +171,16 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
         const val KEY_MAX_TURNS = "max_turns"
         const val KEY_WEAK_MODEL = "weak_model"
         const val KEY_OPENROUTER = "openrouter_options"
+        const val KEY_ACTIVE_PROFILE_ID = "active_profile_id"
+        const val KEY_PROFILES = "model_profiles"
     }
 }
 
 class InMemorySettingsStore(initial: AppSettings = AppSettings()) : SettingsStore {
     private var state = initial
+    private var profiles = emptyList<ModelProfile>()
     override fun load(): AppSettings = state
     override fun save(settings: AppSettings) { state = settings }
+    override fun loadProfiles(): List<ModelProfile> = profiles
+    override fun saveProfiles(profiles: List<ModelProfile>) { this.profiles = profiles }
 }

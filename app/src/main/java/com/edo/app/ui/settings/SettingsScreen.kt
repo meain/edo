@@ -36,7 +36,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.edo.app.AppContainer
 import com.edo.app.data.AppSettings
+import com.edo.app.data.ModelProfile
 import com.edo.app.data.Provider
+import com.edo.app.data.toProfile
+import com.edo.app.data.withProfile
 import com.edo.app.llm.AnthropicClient
 import com.edo.app.llm.Block
 import com.edo.app.llm.ConvMessage
@@ -89,6 +92,13 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
     var testing by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     val scope = rememberCoroutineScope()
+    var profiles by remember { mutableStateOf(container.settings.loadProfiles()) }
+    var showSaveProfile by remember { mutableStateOf(false) }
+
+    fun persistProfiles(list: List<ModelProfile>) {
+        profiles = list
+        container.settings.saveProfiles(list)
+    }
 
     // Refetch (debounced) whenever the credentials change; Anthropic needs a key, others may not.
     var modelIds by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -120,6 +130,23 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
+            ProfilesSection(
+                profiles = profiles,
+                activeId = current.activeProfileId,
+                onSelect = { p ->
+                    current = current.withProfile(p)
+                    container.settings.save(current)
+                    testResult = null
+                },
+                onDelete = { p ->
+                    persistProfiles(profiles.filterNot { it.id == p.id })
+                    if (current.activeProfileId == p.id) {
+                        current = current.copy(activeProfileId = -1L)
+                        container.settings.save(current)
+                    }
+                },
+            )
+            Spacer(Modifier.height(20.dp))
             Text("Provider", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Row {
@@ -231,6 +258,12 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
             Row {
                 Button(onClick = {
                     container.settings.save(current)
+                    // Keep the active profile in step with the edits.
+                    profiles.firstOrNull { it.id == current.activeProfileId }?.let { p ->
+                        persistProfiles(profiles.map {
+                            if (it.id == p.id) current.toProfile(p.id, p.name) else it
+                        })
+                    }
                     onBack()
                 }, modifier = Modifier.weight(1f)) { Text("Save") }
                 Spacer(Modifier.width(8.dp))
@@ -239,6 +272,28 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                     maxTurnsText = current.maxTurns.toString()
                 }) { Text("Reset") }
             }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { showSaveProfile = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Save as profile") }
         }
+    }
+
+    if (showSaveProfile) {
+        SaveProfileDialog(
+            initialName = profiles.firstOrNull { it.id == current.activeProfileId }?.name.orEmpty(),
+            onDismiss = { showSaveProfile = false },
+            onSave = { name ->
+                // Same name replaces that profile; otherwise a new one is added.
+                val existing = profiles.firstOrNull { it.name.equals(name, ignoreCase = true) }
+                val id = existing?.id ?: (profiles.maxOfOrNull { it.id } ?: 0L) + 1
+                val saved = current.toProfile(id, name)
+                persistProfiles(if (existing != null) profiles.map { if (it.id == id) saved else it } else profiles + saved)
+                current = current.copy(activeProfileId = id)
+                container.settings.save(current)
+                showSaveProfile = false
+            },
+        )
     }
 }
