@@ -44,9 +44,11 @@ import com.edo.app.llm.LlmClient
 import com.edo.app.llm.LlmEvent
 import com.edo.app.llm.OpenAIClient
 import com.edo.app.llm.fetchModelIds
+import com.edo.app.llm.OPENROUTER_BASE_URL
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
 import com.edo.app.llm.Role
+import com.edo.app.llm.requestExtras
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
@@ -56,6 +58,10 @@ private suspend fun testConnection(container: AppContainer, s: AppSettings): Pai
     val llm: LlmClient = when (s.provider) {
         Provider.Anthropic -> AnthropicClient(s.baseUrl, s.apiKey, s.model, container.http, maxTokens = 16)
         Provider.OpenAI -> OpenAIClient(s.baseUrl, s.apiKey, s.model, container.http)
+        Provider.OpenRouter -> OpenAIClient(
+            s.baseUrl, s.apiKey, s.model, container.http,
+            extraBody = s.openRouter.requestExtras(s.model),
+        )
     }
     return try {
         var result: Pair<Boolean, String>? = null
@@ -138,6 +144,17 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                     },
                     label = { Text("OpenAI-compatible") },
                 )
+                Spacer(Modifier.width(8.dp))
+                FilterChip(
+                    selected = current.provider == Provider.OpenRouter,
+                    onClick = {
+                        current = current.copy(
+                            provider = Provider.OpenRouter,
+                            baseUrl = if (current.provider != Provider.OpenRouter) OPENROUTER_BASE_URL else current.baseUrl,
+                        )
+                    },
+                    label = { Text("OpenRouter") },
+                )
             }
             Spacer(Modifier.height(20.dp))
             OutlinedTextField(
@@ -172,6 +189,11 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 placeholder = current.model,
                 supportingText = "Used for side tasks like naming chats. Blank uses the main model.",
             )
+            if (current.provider == Provider.OpenRouter) {
+                Spacer(Modifier.height(20.dp))
+                OpenRouterSection(current.openRouter) { current = current.copy(openRouter = it) }
+                Spacer(Modifier.height(10.dp))
+            }
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = maxTurnsText,

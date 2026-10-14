@@ -36,6 +36,8 @@ class OpenAIClient(
     private val model: String,
     private val http: HttpClient,
     private val json: Json = AnthropicClient.DefaultJson,
+    /** Extra top-level request fields (e.g. OpenRouter routing); they override the defaults. */
+    private val extraBody: JsonObject = JsonObject(emptyMap()),
 ) : LlmClient {
 
     override fun stream(
@@ -43,7 +45,7 @@ class OpenAIClient(
         conversation: List<ConvMessage>,
         tools: List<ToolSpec>,
     ): Flow<LlmEvent> = flow {
-        val body = buildRequestJson(model, system, conversation, tools)
+        val body = buildRequestJson(model, system, conversation, tools, extraBody)
         val url = baseUrl.trimEnd('/') + "/v1/chat/completions"
 
         http.preparePost(url) {
@@ -79,6 +81,7 @@ class OpenAIClient(
             system: String?,
             conversation: List<ConvMessage>,
             tools: List<ToolSpec>,
+            extra: JsonObject = JsonObject(emptyMap()),
         ): String {
             val obj = buildJsonObject {
                 put("model", model)
@@ -86,7 +89,7 @@ class OpenAIClient(
                 put("messages", buildMessagesArray(system, conversation))
                 if (tools.isNotEmpty()) put("tools", buildToolsArray(tools))
             }
-            return obj.toString()
+            return JsonObject(obj + extra).toString()
         }
 
         internal fun buildMessagesArray(system: String?, conversation: List<ConvMessage>): JsonArray = buildJsonArray {

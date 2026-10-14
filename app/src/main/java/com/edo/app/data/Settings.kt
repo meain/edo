@@ -4,18 +4,51 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 enum class Provider {
     Anthropic,
-    OpenAI;
+    OpenAI,
+    OpenRouter;
 
     companion object {
         fun fromName(name: String?): Provider = when (name) {
             "OpenAI" -> OpenAI
+            "OpenRouter" -> OpenRouter
             else -> Anthropic
         }
     }
 }
+
+/**
+ * OpenRouter routing and request options. Comma-separated fields hold provider slugs
+ * (e.g. `deepinfra, together`) or model ids; blank / false means "don't send".
+ */
+@Serializable
+data class OpenRouterOptions(
+    /** Only route to these providers (`provider.only`). */
+    val onlyProviders: String = "",
+    /** Never route to these providers (`provider.ignore`). */
+    val ignoreProviders: String = "",
+    /** "", "price", "throughput" or "latency" (`provider.sort`). */
+    val sort: String = "",
+    /** Off = fail instead of falling back to other providers (`provider.allow_fallbacks`). */
+    val allowFallbacks: Boolean = true,
+    /** Only providers that don't store or train on prompts (`provider.data_collection`). */
+    val denyDataCollection: Boolean = false,
+    /** Only providers that support every parameter in the request, e.g. tools (`provider.require_parameters`). */
+    val requireParameters: Boolean = false,
+    /** Only zero-data-retention endpoints (`provider.zdr`). */
+    val zeroDataRetention: Boolean = false,
+    /** Models to try, in order, if the main one fails (`models`). */
+    val fallbackModels: String = "",
+    /** "", "low", "medium" or "high" (`reasoning.effort`). */
+    val reasoningEffort: String = "",
+    /** A JSON object merged into every request body, for anything not covered above. */
+    val extraJson: String = "",
+)
 
 data class AppSettings(
     val provider: Provider = Provider.Anthropic,
@@ -27,6 +60,7 @@ data class AppSettings(
     val maxTurns: Int = 50,
     /** Cheaper model for side tasks (chat titles); blank falls back to [model]. */
     val weakModel: String = "",
+    val openRouter: OpenRouterOptions = OpenRouterOptions(),
 )
 
 /** Settings to use for side tasks such as naming a chat: the weak model if one is set. */
@@ -68,6 +102,9 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
         activeThreadId = prefs.getLong(KEY_ACTIVE_THREAD_ID, -1L),
         maxTurns = prefs.getInt(KEY_MAX_TURNS, 50),
         weakModel = prefs.getString(KEY_WEAK_MODEL, "") ?: "",
+        openRouter = prefs.getString(KEY_OPENROUTER, null)
+            ?.let { runCatching { Json.decodeFromString<OpenRouterOptions>(it) }.getOrNull() }
+            ?: OpenRouterOptions(),
     )
 
     override fun save(settings: AppSettings) {
@@ -80,6 +117,7 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
             .putLong(KEY_ACTIVE_THREAD_ID, settings.activeThreadId)
             .putInt(KEY_MAX_TURNS, settings.maxTurns)
             .putString(KEY_WEAK_MODEL, settings.weakModel)
+            .putString(KEY_OPENROUTER, Json.encodeToString(settings.openRouter))
             .apply()
     }
 
@@ -92,6 +130,7 @@ class EncryptedSettingsStore(context: Context) : SettingsStore {
         const val KEY_ACTIVE_THREAD_ID = "active_thread_id"
         const val KEY_MAX_TURNS = "max_turns"
         const val KEY_WEAK_MODEL = "weak_model"
+        const val KEY_OPENROUTER = "openrouter_options"
     }
 }
 

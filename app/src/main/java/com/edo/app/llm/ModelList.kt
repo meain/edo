@@ -26,7 +26,7 @@ suspend fun fetchModelIds(http: HttpClient, provider: Provider, baseUrl: String,
                     header("anthropic-version", "2023-06-01")
                     parameter("limit", 1000)
                 }
-                Provider.OpenAI -> if (apiKey.isNotEmpty()) header("Authorization", "Bearer $apiKey")
+                Provider.OpenAI, Provider.OpenRouter -> if (apiKey.isNotEmpty()) header("Authorization", "Bearer $apiKey")
             }
         }
         if (!response.status.isSuccess()) return@runCatching emptyList()

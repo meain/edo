@@ -39,6 +39,7 @@ import com.edo.app.llm.LlmClient
 import com.edo.app.llm.LlmEvent
 import com.edo.app.llm.OpenAIClient
 import com.edo.app.llm.Role
+import com.edo.app.llm.requestExtras
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
@@ -265,6 +266,10 @@ class ChatSession internal constructor(
     private fun buildLlm(settings: AppSettings): LlmClient = when (settings.provider) {
         Provider.Anthropic -> AnthropicClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
         Provider.OpenAI -> OpenAIClient(settings.baseUrl, settings.apiKey, settings.model, container.http)
+        Provider.OpenRouter -> OpenAIClient(
+            settings.baseUrl, settings.apiKey, settings.model, container.http,
+            extraBody = settings.openRouter.requestExtras(settings.model),
+        )
     }
 
     /**
