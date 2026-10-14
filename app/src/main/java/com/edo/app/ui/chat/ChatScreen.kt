@@ -87,6 +87,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenu
@@ -565,6 +566,7 @@ fun ChatScreen(
                         }
                     }
                 } else {
+                    SelectionContainer {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
@@ -621,6 +623,7 @@ fun ChatScreen(
                                 )
                             }
                         }
+                    }
                     }
                     // No hint for the first fifth of the pull, so a small overscroll stays invisible.
                     if (pull > newChatPullPx * 0.2f) {
@@ -1086,10 +1089,22 @@ private fun ImageViewer(bitmap: android.graphics.Bitmap, onDismiss: () -> Unit) 
                     .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(50))
                     .size(48.dp),
             ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Share", tint = Color.White)
+                Icon(Icons.Filled.Share, contentDescription = "Share", tint = Color.White)
             }
         }
     }
+}
+
+private const val MAX_IMAGE_SIDE = 1280
+
+/** Decodes a base64 image, subsampling so its longest side stays near [maxSide]. */
+private fun decodeScaled(base64: String, maxSide: Int): android.graphics.Bitmap? {
+    val bytes = Base64.decode(base64, Base64.DEFAULT)
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
 }
 
 private fun saveBitmapToGallery(context: android.content.Context, bitmap: android.graphics.Bitmap): Boolean {
@@ -1109,11 +1124,16 @@ private fun saveBitmapToGallery(context: android.content.Context, bitmap: androi
 }
 
 private fun shareBitmap(context: android.content.Context, bitmap: android.graphics.Bitmap) {
-    val file = java.io.File(context.cacheDir, "edo_share_${System.currentTimeMillis()}.jpg")
-    file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, it) }
-    val uri = androidx.core.content.FileProvider.getUriForFile(
-        context, context.packageName + ".fileprovider", file
-    )
+    // Must live under a directory declared in res/xml/file_paths.xml, or FileProvider throws.
+    val uri = runCatching {
+        val dir = java.io.File(context.cacheDir, "open").apply { mkdirs() }
+        val file = java.io.File(dir, "edo_share_${System.currentTimeMillis()}.jpg")
+        file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, it) }
+        androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+    }.getOrElse {
+        android.widget.Toast.makeText(context, "Couldn't share image", android.widget.Toast.LENGTH_SHORT).show()
+        return
+    }
     val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
         type = "image/jpeg"
         putExtra(android.content.Intent.EXTRA_STREAM, uri)
@@ -1173,12 +1193,8 @@ private fun MessageBubble(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     for (imgBlock in imageBlocks) {
-                        val bytes = remember(imgBlock.base64) {
-                            Base64.decode(imgBlock.base64, Base64.DEFAULT)
-                        }
-                        val bitmap = remember(bytes) {
-                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        }
+                        // Full-size photos decoded on the main thread made the list stutter; cap the size.
+                        val bitmap = remember(imgBlock.base64) { decodeScaled(imgBlock.base64, MAX_IMAGE_SIDE) }
                         if (bitmap != null) {
                             ComposeImage(
                                 bitmap = bitmap.asImageBitmap(),
@@ -1234,14 +1250,13 @@ private fun MessageBubble(
                                 shape = RoundedCornerShape(20.dp),
                                 modifier = Modifier.widthIn(max = 300.dp),
                             ) {
-                                // Long-press selects text natively; the buttons copy / read the whole message.
-                                SelectionContainer {
-                                    Text(
-                                        text = text,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                    )
-                                }
+                                // Long-press selects text natively (the list is one SelectionContainer);
+                                // the buttons copy / read the whole message.
+                                Text(
+                                    text = text,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
                             }
                         }
                     }
@@ -1307,7 +1322,7 @@ private fun AssistantBubble(
         // No bubble: assistant replies sit directly on the background, full width.
         Surface(color = Color.Transparent, modifier = Modifier.weight(1f)) {
             Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
-                SelectionContainer { MarkdownText(text = text) }
+                MarkdownText(text = text)
                 if (isStreaming) {
                     Text(
                         text = "▌",
