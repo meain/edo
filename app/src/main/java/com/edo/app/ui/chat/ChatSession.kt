@@ -369,13 +369,15 @@ class ChatSession internal constructor(
         }
         val systemPrompt = buildSystemPrompt(ws) + if (unattended) UNATTENDED_NOTE else ""
         _state.update { it.copy(running = true, error = null) }
+        var cancelled = false
         try {
             Agent(llm, tools, gate, systemPrompt = systemPrompt, maxTurns = settings.maxTurns).run(conversation).collect { ev -> handle(ev) }
         } catch (t: Throwable) {
             if (t !is CancellationException) {
                 _state.update { it.copy(error = t.message ?: "Unknown error") }
-            }
+            } else cancelled = true
         } finally {
+            if (!cancelled) notifyIfBackgrounded()
             _state.update { s ->
                 s.copy(
                     running = false,
@@ -386,6 +388,20 @@ class ChatSession internal constructor(
             }
             container.db.threads().touch(threadId)
         }
+    }
+
+    /** Scheduled runs have their own notification; queued messages mean the run isn't really over. */
+    private fun notifyIfBackgrounded() {
+        if (unattended || container.inForeground || _state.value.queuedMessages.isNotEmpty()) return
+        val error = _state.value.error
+        val reply = conversation.lastOrNull { it.role == Role.Assistant }
+            ?.blocks?.filterIsInstance<Block.Text>()?.joinToString("\n") { it.text }
+        RunNotifier.post(
+            app, projectId, threadId,
+            title = _state.value.currentThread?.title ?: "Chat",
+            body = error ?: reply ?: "Done",
+            failed = error != null,
+        )
     }
 
     private suspend fun handle(ev: AgentEvent) {

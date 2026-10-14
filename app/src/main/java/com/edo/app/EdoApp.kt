@@ -1,6 +1,8 @@
 package com.edo.app
 
+import android.app.Activity
 import android.app.Application
+import android.os.Bundle
 import android.content.Intent
 import android.net.Uri
 import com.edo.app.data.ChatDatabase
@@ -38,6 +40,9 @@ class AppContainer(private val app: Application) {
     val chatSessions: ChatSessions = ChatSessions(app, this)
 
     val scheduler: ScheduleManager = ScheduleManager(app, this)
+
+    /** True while any activity is started; finished-run notifications are only for when it isn't. */
+    @Volatile var inForeground = false
 
     private val _activeProjectId =MutableStateFlow(settings.load().activeProjectId)
     val activeProjectId: StateFlow<Long> = _activeProjectId.asStateFlow()
@@ -120,6 +125,22 @@ class EdoApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            private var started = 0
+            override fun onActivityStarted(activity: Activity) {
+                started++
+                container.inForeground = true
+            }
+            override fun onActivityStopped(activity: Activity) {
+                started--
+                container.inForeground = started > 0
+            }
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+            override fun onActivityResumed(activity: Activity) = Unit
+            override fun onActivityPaused(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+            override fun onActivityDestroyed(activity: Activity) = Unit
+        })
         // Make sure the alarm matches the table (e.g. after the system cleared it). Not a
         // resync: if this process was started by the alarm itself, its run must not be skipped.
         container.appScope.launch { container.scheduler.rearm() }

@@ -229,6 +229,17 @@ fun ChatScreen(
     val expandedToolIds = remember { mutableStateMapOf<String, Boolean>() }
     var viewingImage by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
 
+    // Needed for "chat finished" notifications; the system stops re-prompting after a denial.
+    val askNotifications = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) {}
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    }
     val pickFiles = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
