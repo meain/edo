@@ -150,6 +150,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.edo.app.AppContainer
 import com.edo.app.EdoApp
+import com.edo.app.ui.openTextExternally
 import com.edo.app.agent.ApprovalDecision
 import com.edo.app.llm.Block
 import com.edo.app.llm.Role
@@ -1179,6 +1180,7 @@ private fun MessageBubble(
                             color = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                             shape = RoundedCornerShape(14.dp),
+                            onClick = { openTextExternally(context, file.name, file.content) },
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),

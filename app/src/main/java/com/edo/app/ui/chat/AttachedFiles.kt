@@ -5,7 +5,9 @@ package com.edo.app.ui.chat
  * `<attached_file>` tag. The UI recognises the tag so the bubble can show a file
  * chip instead of dumping the file's contents.
  */
-internal data class AttachedFile(val name: String, val chars: Int)
+internal data class AttachedFile(val name: String, val content: String) {
+    val chars get() = content.length
+}
 
 internal fun attachedFileBlock(name: String, content: String): String =
     "<attached_file name=\"${name.replace('"', '\'')}\">\n$content\n</attached_file>\n\n"
@@ -21,7 +23,7 @@ internal fun splitAttachedFiles(text: String): Pair<List<AttachedFile>, String> 
     var rest = text
     while (true) {
         val m = ATTACHED_FILE.find(rest) ?: break
-        files.add(AttachedFile(m.groupValues[1], m.groupValues[2].length))
+        files.add(AttachedFile(m.groupValues[1], m.groupValues[2]))
         rest = rest.substring(m.range.last + 1)
     }
     return files to rest.trim()

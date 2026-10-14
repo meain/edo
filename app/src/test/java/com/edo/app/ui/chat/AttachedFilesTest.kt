@@ -10,7 +10,7 @@ class AttachedFilesTest {
         // Content with its own code fence must not end the block early.
         val content = "# hi\n\n```kotlin\nval x = 1\n```"
         val (files, rest) = splitAttachedFiles(attachedFileBlock("notes.md", content) + "summarise this")
-        assertEquals(listOf(AttachedFile("notes.md", content.length)), files)
+        assertEquals(listOf(AttachedFile("notes.md", content)), files)
         assertEquals("summarise this", rest)
     }
 
@@ -24,7 +24,7 @@ class AttachedFilesTest {
     @Test
     fun fileOnlyMessageHasEmptyRest() {
         val (files, rest) = splitAttachedFiles(attachedFileBlock("a.txt", "abc").trimEnd())
-        assertEquals(listOf(AttachedFile("a.txt", 3)), files)
+        assertEquals(listOf(AttachedFile("a.txt", "abc")), files)
         assertEquals("", rest)
     }
 

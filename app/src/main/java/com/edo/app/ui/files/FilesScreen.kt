@@ -1,8 +1,6 @@
 package com.edo.app.ui.files
 
-import android.content.Intent
 import android.net.Uri
-import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -59,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.edo.app.AppContainer
+import com.edo.app.ui.openExternally
 import com.edo.app.agent.FileWorkspace
 import com.edo.app.agent.SafWorkspace
 import com.edo.app.agent.Workspace
@@ -133,6 +132,15 @@ fun FilesScreen(container: AppContainer, onBack: () -> Unit) {
                         }
                     }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    val open = viewing?.first
+                    val ws = workspace
+                    if (open != null && ws != null) {
+                        IconButton(onClick = { openWith(context, ws, open) }) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open with…")
+                        }
                     }
                 },
             )
@@ -276,27 +284,13 @@ fun FilesScreen(container: AppContainer, onBack: () -> Unit) {
 
 private fun openWith(context: android.content.Context, ws: Workspace, path: String) {
     val uri = ws.uriFor(path)
-    if (uri == null || uri.scheme == "file") {
+    if (uri == null) {
         android.widget.Toast
             .makeText(context, "Open With unavailable for this file", android.widget.Toast.LENGTH_SHORT)
             .show()
         return
     }
-    val ext = path.substringAfterLast('.', "").lowercase()
-    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
-    val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(uri, mime)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    val chooser = Intent.createChooser(intent, "Open with").apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    runCatching { context.startActivity(chooser) }.onFailure {
-        android.widget.Toast
-            .makeText(context, "No app available", android.widget.Toast.LENGTH_SHORT)
-            .show()
-    }
+    openExternally(context, path, uri)
 }
 
 @Composable
