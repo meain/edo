@@ -66,6 +66,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Error
@@ -1224,25 +1226,23 @@ private fun MessageBubble(
                         }
                     }
                     if (text.isNotEmpty()) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            shape = RoundedCornerShape(20.dp),
-                            modifier = Modifier.widthIn(max = 300.dp).combinedClickable(
-                                onClick = {},
-                                onLongClick = {
-                                    clipboard.setText(AnnotatedString(text))
-                                    android.widget.Toast
-                                        .makeText(context, "Copied message", android.widget.Toast.LENGTH_SHORT)
-                                        .show()
-                                },
-                            ),
-                        ) {
-                            Text(
-                                text = text,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            MessageActions(text = text, key = "user-${msg.id}", vertical = true)
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                shape = RoundedCornerShape(20.dp),
+                                modifier = Modifier.widthIn(max = 300.dp),
+                            ) {
+                                // Long-press selects text natively; the buttons copy / read the whole message.
+                                SelectionContainer {
+                                    Text(
+                                        text = text,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1265,32 +1265,56 @@ private fun MessageBubble(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+/** Copy-whole-message and read-aloud buttons shown beside a message. */
 @Composable
-private fun AssistantBubble(text: String, isStreaming: Boolean, expandedIds: MutableMap<String, Boolean>) {
+private fun MessageActions(text: String, key: String, vertical: Boolean = false) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
+    val speaker = (context.applicationContext as EdoApp).container.speaker
+    val speaking by speaker.speaking.collectAsState()
+    val reading = speaking == key
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+    val buttons: @Composable () -> Unit = {
+        IconButton(
+            onClick = {
+                clipboard.setText(AnnotatedString(text))
+                android.widget.Toast.makeText(context, "Copied message", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            modifier = Modifier.size(32.dp),
+        ) {
+            Icon(Icons.Filled.ContentCopy, contentDescription = "Copy message", tint = tint, modifier = Modifier.size(16.dp))
+        }
+        IconButton(onClick = { speaker.toggle(key, text) }, modifier = Modifier.size(32.dp)) {
+            Icon(
+                if (reading) Icons.Filled.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = if (reading) "Stop reading" else "Read aloud",
+                tint = if (reading) MaterialTheme.colorScheme.primary else tint,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+    if (vertical) Column { buttons() } else Row { buttons() }
+}
+
+@Composable
+private fun AssistantBubble(
+    text: String,
+    isStreaming: Boolean,
+    expandedIds: MutableMap<String, Boolean>,
+    key: String = text.hashCode().toString(),
+) {
     Row(Modifier.fillMaxWidth()) {
         // No bubble: assistant replies sit directly on the background, full width.
-        Surface(
-            color = Color.Transparent,
-            modifier = Modifier.weight(1f).combinedClickable(
-                onClick = {},
-                onLongClick = {
-                    clipboard.setText(AnnotatedString(text))
-                    android.widget.Toast
-                        .makeText(context, "Copied markdown", android.widget.Toast.LENGTH_SHORT)
-                        .show()
-                },
-            ),
-        ) {
+        Surface(color = Color.Transparent, modifier = Modifier.weight(1f)) {
             Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
-                MarkdownText(text = text)
+                SelectionContainer { MarkdownText(text = text) }
                 if (isStreaming) {
                     Text(
                         text = "▌",
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                } else {
+                    MessageActions(text = text, key = key)
                 }
             }
         }

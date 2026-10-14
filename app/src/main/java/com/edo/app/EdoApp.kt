@@ -41,6 +41,9 @@ class AppContainer(private val app: Application) {
 
     val scheduler: ScheduleManager = ScheduleManager(app, this)
 
+    /** Text-to-speech for the read-aloud buttons; the engine is only bound on first use. */
+    val speaker: com.edo.app.ui.chat.Speaker by lazy { com.edo.app.ui.chat.Speaker(app) }
+
     /** True while any activity is started; finished-run notifications are only for when it isn't. */
     @Volatile var inForeground = false
 
