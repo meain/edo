@@ -91,7 +91,9 @@ adb -s 192.168.1.3:38181 exec-out screencap -p > /tmp/edo.png
 adb -s 192.168.1.3:38181 shell uiautomator dump /sdcard/window.xml   # then `cat | tr '>' '\n' | grep text=` to find tap coords
 ```
 
-**Use Haiku subagents (`model: haiku`) for testing.** Run the test steps through one, and keep builds, installs and judging the results in the main session.
+**Do all testing in the project named OLA** (the one on the device), not the user's real projects, unless the user explicitly says otherwise. Tell the subagent to switch to it first and touch nothing else.
+
+**Use Haiku subagents (`model: haiku`) for testing.** Run the test steps through one, and keep builds, installs and judging the results in the main session. Anything done on the phone goes through a Haiku subagent, for two reasons: Haiku is cheaper, and the main loop doesn't need the full context (screenshots, uiautomator dumps, scroll-by-scroll output), only the short report it sends back.
 
 Delegate on-device navigation (tapping through screens, typing a prompt, scrolling a chat and reading tool results, screenshots) to a Haiku subagent (`model: haiku`). It has handled both reading a long chat transcript and launching, typing, sending and reading results. Give it the device id, the exact `adb` commands (nested quoting for `input text`, `%s` for spaces), the project it may touch, and tell it not to modify anything beyond the task. Keep builds, installs and judging the results in the main session.
 
