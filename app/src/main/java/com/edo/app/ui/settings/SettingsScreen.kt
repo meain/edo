@@ -43,6 +43,9 @@ import com.edo.app.llm.ConvMessage
 import com.edo.app.llm.LlmClient
 import com.edo.app.llm.LlmEvent
 import com.edo.app.llm.OpenAIClient
+import com.edo.app.llm.fetchModelIds
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.LaunchedEffect
 import com.edo.app.llm.Role
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.takeWhile
@@ -80,6 +83,17 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
     var testing by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     val scope = rememberCoroutineScope()
+
+    // Refetch (debounced) whenever the credentials change; Anthropic needs a key, others may not.
+    var modelIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(current.provider, current.baseUrl, current.apiKey) {
+        modelIds = emptyList()
+        if (current.baseUrl.isBlank() || (current.provider == Provider.Anthropic && current.apiKey.isBlank())) {
+            return@LaunchedEffect
+        }
+        delay(600)
+        modelIds = fetchModelIds(container.http, current.provider, current.baseUrl, current.apiKey)
+    }
 
     Scaffold(
         topBar = {
@@ -143,22 +157,20 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 visualTransformation = PasswordVisualTransformation(),
             )
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
+            ModelField(
                 value = current.model,
                 onValueChange = { current = current.copy(model = it) },
-                label = { Text("Model") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
+                label = "Model",
+                options = modelIds,
             )
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
+            ModelField(
                 value = current.weakModel,
                 onValueChange = { current = current.copy(weakModel = it) },
-                label = { Text("Weak model (optional)") },
-                placeholder = { Text(current.model) },
-                supportingText = { Text("Used for side tasks like naming chats. Blank uses the main model.") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
+                label = "Weak model (optional)",
+                options = modelIds,
+                placeholder = current.model,
+                supportingText = "Used for side tasks like naming chats. Blank uses the main model.",
             )
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
