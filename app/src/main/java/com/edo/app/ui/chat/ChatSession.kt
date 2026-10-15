@@ -83,6 +83,9 @@ class ChatSession internal constructor(
      */
     internal var unattended = false
 
+    /** Title for the thread created by the first message, instead of the message text. */
+    internal var initialTitle: String? = null
+
     /** Suspends until the current run (and any queued follow-ups) has finished. */
     internal suspend fun awaitIdle() {
         job?.join()
@@ -160,7 +163,8 @@ class ChatSession internal constructor(
                 val id = container.db.threads().insert(
                     ThreadEntity(
                         projectId = projectId,
-                        title = text.ifBlank { "Image message" }.take(48),
+                        title = initialTitle ?: text.ifBlank { "Image message" }.take(48),
+                        fromSchedule = unattended,
                         createdAt = now,
                         lastUpdatedAt = now,
                     )

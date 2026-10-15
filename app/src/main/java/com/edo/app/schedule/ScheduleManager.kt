@@ -146,6 +146,8 @@ class ScheduleManager(private val app: Application, private val container: AppCo
                 logRun(s.id, threadId = 0, startedAt = startedAt, status = "FAILED")
                 return
             }
+            val stamp = RUN_TITLE_FORMAT.format(Instant.ofEpochMilli(startedAt).atZone(ZoneId.systemDefault()))
+            session.initialTitle = "${s.title} · $stamp"
             session.send(s.prompt)
             val finished = withTimeoutOrNull(RUN_TIMEOUT_MS) { session.awaitIdle(); true }
             if (finished == null) session.cancelAgent()
@@ -156,10 +158,6 @@ class ScheduleManager(private val app: Application, private val container: AppCo
                 finished == null -> "TIMEOUT"
                 state.error != null -> "FAILED"
                 else -> "OK"
-            }
-            if (threadId > 0) {
-                val stamp = RUN_TITLE_FORMAT.format(Instant.ofEpochMilli(startedAt).atZone(ZoneId.systemDefault()))
-                container.db.threads().updateTitleAndTimestamp(threadId, "⏰ ${s.title} · $stamp", System.currentTimeMillis())
             }
             val reply = state.messages
                 .lastOrNull { it.role == Role.Assistant && it.blocks.any { b -> b is Block.Text } }

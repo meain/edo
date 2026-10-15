@@ -5,7 +5,7 @@ Claude-Code-style agent app for Android. Kotlin + Jetpack Compose, Material 3 wi
 ## Architecture
 
 - `app/src/main/java/com/edo/app/`
-  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`; currently v11), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
+  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`; currently v12), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
   - `llm/` — `AnthropicClient`, `OpenAIClient` (also used for OpenRouter, with `OpenRouterOptions.requestExtras`), `fetchModelIds` for model autocomplete, shared `LlmClient` + streaming `LlmEvent` types
   - `agent/` — `Agent` loop, `ApprovalGate`, tools, `SafWorkspace` / `FileWorkspace` / `InMemoryWorkspace`
   - `schedule/` — `ScheduleManager` (save/run/re-arm), `Recurrence` (next-run maths), `ScheduleReceiver` (alarm + boot/time broadcasts), `ScheduleNotifier`
@@ -42,7 +42,7 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 
 - Schedules are per project: ONCE, INTERVAL (min 15 min), DAILY, WEEKLY, MONTHLY (short months run on their last day). One exact alarm (`setExactAndAllowWhileIdle`, inexact fallback without `SCHEDULE_EXACT_ALARM`) always points at the earliest `next_run_at`; `ScheduleManager.rearm()` re-aims it after any change.
 - `ScheduleReceiver` handles the alarm (`takeDue()` advances each due schedule, then `run()` executes it) and boot / app-update / clock / time-zone broadcasts (`resync()`). Missed runs are skipped, not replayed. `EdoApp.onCreate` only re-arms (never resyncs), so an alarm-started process doesn't skip its own run.
-- Each run is an unattended `ChatSession` (`ChatSessions.unattended`) in a new thread titled "⏰ title · time" (the chat list keys its alarm icon off that prefix): tool calls are denied unless the project is yolo, `ask_user` gets a canned answer, it never steals the on-screen chat, gets no `schedule` tool, and is cut off after 10 minutes. A run for a schedule already running is skipped. The outcome goes through `ScheduleNotifier` (channel `schedule_results`); tapping it opens the thread.
+- Each run is an unattended `ChatSession` (`ChatSessions.unattended`) in a new thread titled "title · time" and flagged `ThreadEntity.fromSchedule` at creation (the chat list shows an alarm icon for flagged threads): tool calls are denied unless the project is yolo, `ask_user` gets a canned answer, it never steals the on-screen chat, gets no `schedule` tool, and is cut off after 10 minutes. A run for a schedule already running is skipped. The outcome goes through `ScheduleNotifier` (channel `schedule_results`); tapping it opens the thread.
 - "Run now" launches on the app scope (leaving the screen must not cancel it) and shows a spinner via `ScheduleManager.running`.
 
 ## Cost meter and run history
@@ -112,4 +112,4 @@ Each project's agent must only reach its own folder. The OS boundary is the per-
 - A file sent with a message is inlined as an `<attached_file>` block (`AttachedFiles.kt`); there is no file on disk, so opening it externally writes the text to the cache first.
 - Anything handed to another app through `FileProvider` must live under a directory declared in `res/xml/file_paths.xml` (`captures/`, `open/`), or `getUriForFile` throws.
 - OpenRouter extras are plain request-body fields (`provider.only/ignore/sort/...`, `models`, `reasoning`) merged over the normal body; the user's raw JSON wins. The field names were written from memory, not checked against OpenRouter's current docs.
-- Room uses explicit migrations (3→4 … 10→11) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.
+- Room uses explicit migrations (3→4 … 11→12) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.

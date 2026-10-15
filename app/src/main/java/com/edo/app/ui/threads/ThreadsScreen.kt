@@ -226,8 +226,7 @@ private fun ThreadRow(
                 .padding(start = 12.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Scheduled runs are titled "⏰ title · time" (see ScheduleManager).
-            val scheduled = thread.title.startsWith(SCHEDULED_PREFIX)
+            val scheduled = thread.fromSchedule
             Icon(
                 if (scheduled) Icons.Filled.Alarm else Icons.AutoMirrored.Filled.Chat,
                 contentDescription = if (scheduled) "Scheduled chat" else null,
@@ -237,7 +236,7 @@ private fun ThreadRow(
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = if (scheduled) thread.title.removePrefix(SCHEDULED_PREFIX) else thread.title,
+                text = thread.title,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
@@ -262,7 +261,6 @@ private fun ThreadRow(
     }
 }
 
-private const val SCHEDULED_PREFIX = "⏰ "
 private const val MAX_VISIBLE_CHATS = 15
 
 /** Escapes LIKE wildcards so the query matches literally (pairs with `ESCAPE '\'`). */

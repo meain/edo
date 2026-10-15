@@ -67,6 +67,8 @@ data class ThreadEntity(
     @ColumnInfo(name = "output_tokens", defaultValue = "0") val outputTokens: Long = 0,
     @ColumnInfo(name = "cost_usd", defaultValue = "0") val costUsd: Double = 0.0,
     @ColumnInfo(name = "cost_partial", defaultValue = "0") val costPartial: Boolean = false,
+    /** Started by a schedule rather than by the user; the chat list marks these with an alarm icon. */
+    @ColumnInfo(name = "from_schedule", defaultValue = "0") val fromSchedule: Boolean = false,
 )
 
 @Dao
@@ -260,7 +262,7 @@ interface ScheduleRunDao {
         ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class,
         ScheduleRunEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -398,13 +400,22 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v11 → v12: flag threads started by schedules, replacing the "⏰ " title prefix. */
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE threads ADD COLUMN from_schedule INTEGER NOT NULL DEFAULT 0")
+                // "⏰ " is two characters; drop it from the title along with setting the flag.
+                db.execSQL("UPDATE threads SET from_schedule = 1, title = SUBSTR(title, 3) WHERE title LIKE '⏰ %'")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }
