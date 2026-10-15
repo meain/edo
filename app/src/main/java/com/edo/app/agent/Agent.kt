@@ -4,6 +4,7 @@ import com.edo.app.llm.Block
 import com.edo.app.llm.ConvMessage
 import com.edo.app.llm.LlmClient
 import com.edo.app.llm.LlmEvent
+import com.edo.app.llm.TokenUsage
 import com.edo.app.llm.Role
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -37,6 +38,7 @@ sealed interface AgentEvent {
     data class ToolCallReady(val id: String, val name: String, val argsJson: String) : AgentEvent
     data class ToolCallApproval(val id: String, val decision: ApprovalDecision) : AgentEvent
     data class ToolCallResult(val id: String, val result: ToolResult) : AgentEvent
+    data class UsageReport(val usage: TokenUsage) : AgentEvent
     data class TurnDone(val stopReason: String?) : AgentEvent
     data class Failure(val message: String) : AgentEvent
     data class Retrying(val attempt: Int, val maxAttempts: Int, val cause: String? = null, val delayMs: Long = 2000L) : AgentEvent
@@ -99,6 +101,7 @@ class Agent(
                             acc.finalArgs = argsJson
                             emit(AgentEvent.ToolCallReady(ev.id, acc.name, argsJson))
                         }
+                        is LlmEvent.Usage -> emit(AgentEvent.UsageReport(ev.usage))
                         is LlmEvent.TurnEnd -> {
                             stopReason = ev.stopReason
                         }

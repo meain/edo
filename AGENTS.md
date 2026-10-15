@@ -23,7 +23,9 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 
 ## Tools
 
-14 tools, all scoped to the project workspace: `read` (file, directory listing, or glob search), `write_file`, `edit_file`, `copy_file`, `delete_file`, `grep`, `http_request`, `web_search` (DuckDuckGo Lite), `current_datetime`, `ask_user`, `calculator`, `load_skill`, `run_lua`, `schedule` (not offered to scheduled runs).
+14 tools, all scoped to the project workspace: `read` (file, directory listing, or glob search), `write_file`, `edit_file`, `copy_file`, `delete_file`, `grep`, `fetch_page`, `web_search` (DuckDuckGo Lite), `current_datetime`, `ask_user`, `calculator`, `load_skill`, `run_lua`, `schedule` (not offered to scheduled runs).
+
+`fetch_page` GETs a URL and returns the article as Markdown (Readability4J picks the article, our Jsoup walker converts it; falls back to `article`/`main`/body), `raw: true` for the full HTML, and pages long output with `offset`. There is no general HTTP tool: other methods and headers go through Lua `http.*`.
 
 `run_lua` is a sandboxed Lua 5.2 program, always on. It has `fs.read/ls/exists/write/delete` over the project `Workspace`, and `http.get/post/request` only when the project enables it (`ProjectEntity.luaNetwork`, off by default; DB column `lua_enabled`). Globals are an allowlist (base, table, string, bit32, coroutine, math) — never `JsePlatform.standardGlobals()`, which exposes `luajava` (a bridge to any Java class, so to every project's folder grant) and `debug`.
 
@@ -42,6 +44,12 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 - `ScheduleReceiver` handles the alarm (`takeDue()` advances each due schedule, then `run()` executes it) and boot / app-update / clock / time-zone broadcasts (`resync()`). Missed runs are skipped, not replayed. `EdoApp.onCreate` only re-arms (never resyncs), so an alarm-started process doesn't skip its own run.
 - Each run is an unattended `ChatSession` (`ChatSessions.unattended`) in a new thread titled "⏰ title · time" (the chat list keys its alarm icon off that prefix): tool calls are denied unless the project is yolo, `ask_user` gets a canned answer, it never steals the on-screen chat, gets no `schedule` tool, and is cut off after 10 minutes. A run for a schedule already running is skipped. The outcome goes through `ScheduleNotifier` (channel `schedule_results`); tapping it opens the thread.
 - "Run now" launches on the app scope (leaving the screen must not cancel it) and shows a spinner via `ScheduleManager.running`.
+
+## Cost meter and run history
+
+- Both clients emit `LlmEvent.Usage` (Anthropic from `message_start`/`message_delta`; OpenAI-style needs `stream_options.include_usage`, and OpenRouter also `usage.include` for its own `cost`). `ChatSession.recordUsage` adds each turn to the thread (`ThreadEntity.inputTokens/outputTokens/costUsd/costPartial`), shown under the project name in the chat top bar. Chat-title generation is not counted.
+- Cost is the provider-reported figure, else `PriceBook` (LiteLLM `model_prices_and_context_window.json`, cached in `filesDir`, refreshed weekly). A model with no price adds tokens but no cost and sets `costPartial`, shown as `$0.04+`.
+- `ScheduleRunEntity` (`schedule_runs`) gets one row per run, including skipped and failed ones, copying the thread totals; the newest 30 per schedule are kept. The history icon on a schedule row lists them and opens the run's chat.
 
 ## Skills
 

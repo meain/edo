@@ -24,6 +24,8 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.put
 
 /**
@@ -45,7 +47,11 @@ class OpenAIClient(
         conversation: List<ConvMessage>,
         tools: List<ToolSpec>,
     ): Flow<LlmEvent> = flow {
-        val body = buildRequestJson(model, system, conversation, tools, extraBody)
+        // OpenRouter only reports the price it charged when asked; the user's raw JSON still wins.
+        val extra = if (baseUrl.contains("openrouter.ai")) {
+            JsonObject(mapOf("usage" to buildJsonObject { put("include", true) }) + extraBody)
+        } else extraBody
+        val body = buildRequestJson(model, system, conversation, tools, extra)
         val url = baseUrl.trimEnd('/') + "/v1/chat/completions"
 
         http.preparePost(url) {
@@ -86,6 +92,8 @@ class OpenAIClient(
             val obj = buildJsonObject {
                 put("model", model)
                 put("stream", true)
+                // Without this the final chunk carries no token counts.
+                put("stream_options", buildJsonObject { put("include_usage", true) })
                 put("messages", buildMessagesArray(system, conversation))
                 if (tools.isNotEmpty()) put("tools", buildToolsArray(tools))
             }
@@ -210,10 +218,14 @@ class OpenAIClient(
             val toolIdsByIndex = mutableMapOf<Int, String>()
             val toolStartedByIndex = mutableSetOf<Int>()
             var lastFinish: String? = null
+            // Some servers repeat usage on every chunk, so keep the latest and report it once.
+            var usage: TokenUsage? = null
 
             parseSse(lines).collect { ev ->
                 val data = ev.data
                 if (data.trim() == "[DONE]") {
+                    usage?.let { emit(LlmEvent.Usage(it)) }
+                    usage = null
                     emit(LlmEvent.TurnEnd(lastFinish))
                     return@collect
                 }
@@ -225,6 +237,17 @@ class OpenAIClient(
                     val msg = err.jsonObject["message"]?.jsonPrimitive?.contentOrNull ?: data
                     emit(LlmEvent.Failure(msg))
                     return@collect
+                }
+
+                (payload["usage"] as? JsonObject)?.let { u ->
+                    // prompt_tokens includes cached ones; keep the two apart, as Anthropic's do.
+                    val cached = (u["prompt_tokens_details"] as? JsonObject)?.long("cached_tokens") ?: 0L
+                    usage = TokenUsage(
+                        inputTokens = (u.long("prompt_tokens") - cached).coerceAtLeast(0),
+                        outputTokens = u.long("completion_tokens"),
+                        cacheReadTokens = cached,
+                        costUsd = u["cost"]?.jsonPrimitive?.doubleOrNull,
+                    )
                 }
 
                 val choices = payload["choices"]?.jsonArray ?: return@collect

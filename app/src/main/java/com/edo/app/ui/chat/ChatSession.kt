@@ -14,7 +14,7 @@ import com.edo.app.agent.DeleteFileTool
 import com.edo.app.agent.EditFileTool
 import com.edo.app.agent.FileWorkspace
 import com.edo.app.agent.GrepTool
-import com.edo.app.agent.HttpRequestTool
+import com.edo.app.agent.FetchPageTool
 import com.edo.app.agent.KtorHttpFetcher
 import com.edo.app.agent.LoadSkillTool
 import com.edo.app.agent.ReadTool
@@ -39,6 +39,8 @@ import com.edo.app.llm.LlmClient
 import com.edo.app.llm.LlmEvent
 import com.edo.app.llm.OpenAIClient
 import com.edo.app.llm.Role
+import com.edo.app.llm.TokenUsage
+import com.edo.app.llm.cost
 import com.edo.app.llm.requestExtras
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -321,11 +323,13 @@ class ChatSession internal constructor(
             _state.update { it.copy(error = "Project not found.") }
             return
         }
-        val settings = container.settings.load().withOverrides(project)
+        val settings = container.settings.load().withOverrides(project, container.settings.loadProfiles())
         if (settings.apiKey.isBlank()) {
             _state.update { it.copy(error = "Add your API key in Settings.") }
             return
         }
+        runProvider = settings.provider
+        runModel = settings.model
         val ws = workspaceFor(project)
         val askUser: suspend (String, List<String>) -> String? = ask@{ question, options ->
             if (unattended) return@ask "No user is available (scheduled run). Make your best judgment and continue."
@@ -346,7 +350,7 @@ class ChatSession internal constructor(
                 DeleteFileTool(ws),
                 CopyFileTool(ws),
                 GrepTool(ws),
-                HttpRequestTool(KtorHttpFetcher(container.http)),
+                FetchPageTool(KtorHttpFetcher(container.http)),
                 WebSearchTool(KtorHttpFetcher(container.http)),
                 DateTimeTool(),
                 CalculatorTool(),
@@ -445,6 +449,8 @@ class ChatSession internal constructor(
                     it.copy(pendingToolCalls = it.pendingToolCalls + (ev.id to cur.copy(result = ev.result.content, isError = ev.result.isError)))
                 }
 
+            is AgentEvent.UsageReport -> recordUsage(ev.usage)
+
             is AgentEvent.TurnDone -> persistNewMessages()
 
             is AgentEvent.Failure -> _state.update { it.copy(error = ev.message) }
@@ -457,6 +463,23 @@ class ChatSession internal constructor(
 
             AgentEvent.Finished -> Unit
         }
+    }
+
+    /** Provider and model of the current run, for pricing its usage. */
+    private var runProvider = Provider.Anthropic
+    private var runModel = ""
+
+    /**
+     * Adds one response's tokens to the thread's totals. The cost is whatever the provider
+     * reported, else the model's LiteLLM price; with neither the turn counts as partial.
+     */
+    private suspend fun recordUsage(u: TokenUsage) {
+        if (threadId <= 0) return
+        val cost = u.costUsd ?: container.priceBook.price(runProvider, runModel)?.cost(u)
+        val input = u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens
+        container.db.threads().addUsage(threadId, input, u.outputTokens, cost ?: 0.0, cost == null)
+        val thread = container.db.threads().getById(threadId)
+        _state.update { it.copy(currentThread = thread) }
     }
 
     private suspend fun persistNewMessages() {

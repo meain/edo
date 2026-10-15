@@ -95,11 +95,15 @@ data class AppSettings(
 fun AppSettings.forSideTasks(): AppSettings =
     if (weakModel.isBlank()) this else copy(model = weakModel.trim())
 
-/** Global settings with the project's model / max-turns overrides applied, if any. */
-fun AppSettings.withOverrides(project: ProjectEntity): AppSettings = copy(
-    model = project.modelOverride?.takeIf { it.isNotBlank() } ?: model,
-    maxTurns = project.maxTurnsOverride?.takeIf { it > 0 } ?: maxTurns,
-)
+/**
+ * Global settings with the project's profile / max-turns overrides applied, if any. A profile that
+ * has since been deleted falls back to the global connection.
+ */
+fun AppSettings.withOverrides(project: ProjectEntity, profiles: List<ModelProfile>): AppSettings {
+    val profile = project.profileOverride?.let { id -> profiles.firstOrNull { it.id == id } }
+    val base = if (profile != null) withProfile(profile) else this
+    return base.copy(maxTurns = project.maxTurnsOverride?.takeIf { it > 0 } ?: maxTurns)
+}
 
 interface SettingsStore {
     fun load(): AppSettings

@@ -1,5 +1,9 @@
 package com.edo.app.llm
 
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+
 /**
  * Provider-neutral conversation model. Each provider client translates
  * Conversation <-> wire format.
@@ -54,5 +58,22 @@ sealed interface LlmEvent {
     /** End of the assistant turn (no more deltas this turn). */
     data class TurnEnd(val stopReason: String?) : LlmEvent
 
+    /** Token usage for the response that just streamed; may arrive anywhere in the stream. */
+    data class Usage(val usage: TokenUsage) : LlmEvent
+
     data class Failure(val message: String) : LlmEvent
 }
+
+/**
+ * Token counts for one model response. [inputTokens] excludes cache reads and writes, which are
+ * counted separately; [costUsd] is set only when the provider reports the price itself.
+ */
+data class TokenUsage(
+    val inputTokens: Long = 0,
+    val outputTokens: Long = 0,
+    val cacheReadTokens: Long = 0,
+    val cacheWriteTokens: Long = 0,
+    val costUsd: Double? = null,
+)
+
+internal fun JsonObject.long(key: String): Long = this[key]?.jsonPrimitive?.longOrNull ?: 0L

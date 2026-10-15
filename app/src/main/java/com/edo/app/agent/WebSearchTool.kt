@@ -16,7 +16,7 @@ class WebSearchTool(private val fetcher: HttpFetcher) : Tool {
     override val spec = ToolSpec(
         name = "web_search",
         description = "Search the web (DuckDuckGo) and return result titles, URLs and snippets. " +
-            "Use http_request on a result URL to read the full page.",
+            "Use fetch_page on a result URL to read the full page.",
         parametersJson = """{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","description":"Max results, default 8, max 20"}},"required":["query"]}""",
     )
 

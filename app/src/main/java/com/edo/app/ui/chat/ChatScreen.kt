@@ -153,6 +153,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.edo.app.AppContainer
 import com.edo.app.EdoApp
+import com.edo.app.data.usage
 import com.edo.app.ui.openTextExternally
 import com.edo.app.agent.ApprovalDecision
 import com.edo.app.llm.Block
@@ -460,6 +461,16 @@ fun ChatScreen(
                                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                 )
                             }
+                        }
+                        val usage = state.currentThread?.usage()
+                        if (usage != null && !usage.isEmpty) {
+                            Text(
+                                text = usage.label(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 },
@@ -1726,11 +1737,7 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
             val path = s("path")
             if (path.isNullOrBlank()) "\"$pattern\"" else "\"$pattern\" in $path"
         }
-        "http_request" -> {
-            val method = s("method")?.uppercase() ?: "GET"
-            val url = s("url") ?: ""
-            "$method $url"
-        }
+        "fetch_page" -> s("url") ?: ""
         "web_search" -> s("query") ?: ""
         "load_skill" -> s("name") ?: ""
         "current_datetime" -> ""
@@ -1745,7 +1752,7 @@ internal fun toolHeader(name: String, argsJson: String): Pair<String, String> {
         "copy_file" -> "Copy"
         "ls" -> "List"
         "grep" -> "Grep"
-        "http_request" -> "HTTP"
+        "fetch_page" -> "Fetch"
         "web_search" -> "Search"
         "load_skill" -> "Skill"
         "current_datetime" -> "Time"
@@ -1778,7 +1785,7 @@ internal fun iconForTool(name: String, isError: Boolean): androidx.compose.ui.gr
     name == "copy_file" -> Icons.Filled.ContentCopy
     name == "ls" -> Icons.Filled.Folder
     name == "grep" || name == "web_search" -> Icons.Filled.Search
-    name == "http_request" -> Icons.Filled.Language
+    name == "fetch_page" -> Icons.Filled.Language
     name == "load_skill" -> Icons.Filled.AutoAwesome
     name == "current_datetime" -> Icons.Filled.Schedule
     name == "calculator" -> Icons.Filled.Add

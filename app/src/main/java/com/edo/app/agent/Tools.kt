@@ -356,32 +356,6 @@ interface HttpFetcher {
     suspend fun fetch(url: String, method: String, headers: Map<String, String>, body: String?): String
 }
 
-class HttpRequestTool(private val fetcher: HttpFetcher) : Tool {
-    override val spec = ToolSpec(
-        name = "http_request",
-        description = "Make an HTTP request and return the body.",
-        parametersJson = """{"type":"object","properties":{"url":{"type":"string"},"method":{"type":"string"},"headers":{"type":"object"},"body":{"type":"string"}},"required":["url"]}""",
-    )
-
-    override suspend fun invoke(argsJson: String): ToolResult {
-        val args = parseArgs(argsJson) ?: return argsParseError(argsJson)
-        val url = args.str("url") ?: return ToolResult("missing 'url'", isError = true)
-        val method = args.str("method")?.uppercase() ?: "GET"
-        val headers = (args["headers"] as? JsonObject)
-            ?.entries
-            ?.mapNotNull { (k, v) -> v.jsonPrimitive.contentOrNull?.let { k to it } }
-            ?.toMap()
-            ?: emptyMap()
-        val body = args.str("body")
-        return try {
-            val out = fetcher.fetch(url, method, headers, body)
-            ToolResult(if (out.length > MAX_BYTES) out.substring(0, MAX_BYTES) + "\n…[truncated]" else out)
-        } catch (t: Throwable) {
-            ToolResult("http error: ${t.message}", isError = true)
-        }
-    }
-}
-
 class KtorHttpFetcher(private val http: HttpClient) : HttpFetcher {
     override suspend fun fetch(
         url: String,

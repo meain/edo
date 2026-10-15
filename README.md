@@ -9,7 +9,7 @@ A Claude Code-style agent app for Android. Edo gives you a chat-driven coding ag
 ## Features
 
 - **LLM providers** — Anthropic Messages API or any OpenAI-compatible Chat Completions endpoint (OpenRouter, Ollama, LM Studio, etc.) with streaming and native tool use
-- **Workspace tools** — `read_file`, `write_file`, `edit_file` (string replacement), `copy_file`, `delete_file`, `ls`, `grep`, `http_request`, `current_datetime`, `ask_user`, `calculator`, `load_skill`
+- **Workspace tools** — `read_file`, `write_file`, `edit_file` (string replacement), `copy_file`, `delete_file`, `ls`, `grep`, `fetch_page`, `current_datetime`, `ask_user`, `calculator`, `load_skill`
 - **Projects & threads** — each project pins a workspace folder; threads are chat sessions scoped to a project
 - **Per-project settings** — description and YOLO mode (auto-approve all tool calls) on the project, not globally
 - **File browser** — built-in browser for the workspace folder with Markdown preview and long-press actions (open with system chooser, delete)

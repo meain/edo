@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -74,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.edo.app.AppContainer
 import com.edo.app.data.ScheduleEntity
+import com.edo.app.data.usage
 import com.edo.app.schedule.MIN_INTERVAL_MINUTES
 import com.edo.app.schedule.ScheduleKind
 import kotlinx.coroutines.flow.flowOf
@@ -107,6 +109,7 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
     var editing by remember { mutableStateOf<ScheduleEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<ScheduleEntity?>(null) }
+    var historyFor by remember { mutableStateOf<ScheduleEntity?>(null) }
     val runningIds by container.scheduler.running.collectAsState()
     // Re-checked on each recomposition so the banner clears after returning from system settings.
     val exactOk = container.scheduler.canScheduleExact()
@@ -197,6 +200,7 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
                                 // or drop its notification.
                                 container.appScope.launch { container.scheduler.run(s) }
                             },
+                            onHistory = { historyFor = s },
                             onDelete = { confirmDelete = s },
                         )
                     }
@@ -229,6 +233,18 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
         }
     }
 
+    historyFor?.let { s ->
+        RunHistoryDialog(
+            container, s,
+            onOpenThread = { id ->
+                container.setActiveThread(id)
+                historyFor = null
+                onBack()
+            },
+            onDismiss = { historyFor = null },
+        )
+    }
+
     confirmDelete?.let { s ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
@@ -252,6 +268,7 @@ private fun ScheduleRow(
     onEdit: () -> Unit,
     onToggle: (Boolean) -> Unit,
     onRunNow: () -> Unit,
+    onHistory: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Row(
@@ -287,6 +304,9 @@ private fun ScheduleRow(
             } else {
                 Icon(Icons.Filled.PlayArrow, "Run now", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+        IconButton(onClick = onHistory, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.History, "Run history", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Filled.Delete, "Delete", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -514,4 +534,61 @@ private fun lastRunLabel(s: ScheduleEntity): String = when {
     s.lastStatus == "SKIPPED" -> "Last run skipped"
     s.lastRunAt == 0L -> s.lastStatus.lowercase().replaceFirstChar { it.uppercase() }
     else -> "Last run ${stamp(s.lastRunAt)} · ${s.lastStatus.lowercase()}"
+}
+
+private fun durationLabel(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    return if (s < 60) "${s}s" else "${s / 60}m ${s % 60}s"
+}
+
+/** The last runs of [s], newest first; tapping one opens its chat if it still exists. */
+@Composable
+private fun RunHistoryDialog(
+    container: AppContainer,
+    s: ScheduleEntity,
+    onOpenThread: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val runs by remember(s.id) { container.db.scheduleRuns().observeForSchedule(s.id) }
+        .collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Run history · ${s.title}") },
+        text = {
+            if (runs.isEmpty()) {
+                Text("No runs yet.", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                LazyColumn {
+                    items(runs, key = { it.id }) { r ->
+                        val failed = r.status == "FAILED" || r.status == "TIMEOUT"
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = r.threadId > 0) {
+                                    scope.launch {
+                                        if (container.db.threads().getById(r.threadId) != null) onOpenThread(r.threadId)
+                                    }
+                                }
+                                .padding(vertical = 6.dp),
+                        ) {
+                            Text(
+                                "${stamp(r.startedAt)} · ${r.status.lowercase()} · ${durationLabel(r.durationMs)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                            )
+                            if (!r.usage().isEmpty) {
+                                Text(
+                                    r.usage().label(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }

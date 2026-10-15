@@ -6,6 +6,8 @@ import android.app.PendingIntent
 import android.content.Intent
 import com.edo.app.AppContainer
 import com.edo.app.data.ScheduleEntity
+import com.edo.app.data.ScheduleRunEntity
+import com.edo.app.data.usage
 import com.edo.app.llm.Block
 import com.edo.app.llm.Role
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,11 +55,13 @@ class ScheduleManager(private val app: Application, private val container: AppCo
     suspend fun get(id: Long): ScheduleEntity? = dao.getById(id)
 
     suspend fun delete(s: ScheduleEntity) {
+        container.db.scheduleRuns().deleteForSchedule(s.id)
         dao.delete(s)
         rearm()
     }
 
     suspend fun deleteForProject(projectId: Long) {
+        container.db.scheduleRuns().deleteForProject(projectId)
         dao.deleteForProject(projectId)
         rearm()
     }
@@ -123,16 +127,18 @@ class ScheduleManager(private val app: Application, private val container: AppCo
     suspend fun run(s: ScheduleEntity) {
         if (s.id in _running.value) {
             record(s.id) { it.copy(lastStatus = "SKIPPED") }
+            logRun(s.id, threadId = 0, startedAt = System.currentTimeMillis(), status = "SKIPPED")
             return
         }
         _running.update { it + s.id }
         try {
+            val startedAt = System.currentTimeMillis()
             val session = container.chatSessions.unattended(s.projectId)
             if (session == null) {
                 record(s.id) { it.copy(lastStatus = "FAILED") }
+                logRun(s.id, threadId = 0, startedAt = startedAt, status = "FAILED")
                 return
             }
-            val startedAt = System.currentTimeMillis()
             session.send(s.prompt)
             val finished = withTimeoutOrNull(RUN_TIMEOUT_MS) { session.awaitIdle(); true }
             if (finished == null) session.cancelAgent()
@@ -157,10 +163,28 @@ class ScheduleManager(private val app: Application, private val container: AppCo
                 else -> state.error ?: "Run failed."
             }
             record(s.id) { it.copy(lastStatus = status, lastThreadId = threadId) }
+            logRun(s.id, threadId, startedAt, status)
             ScheduleNotifier.post(app, s, status, body, threadId)
         } finally {
             _running.update { it - s.id }
         }
+    }
+
+    /** Adds a history row for a run; its tokens and cost are the totals of the chat it ran in. */
+    private suspend fun logRun(scheduleId: Long, threadId: Long, startedAt: Long, status: String) {
+        // The schedule may have been deleted mid-run; don't leave orphan history behind.
+        if (dao.getById(scheduleId) == null) return
+        val usage = if (threadId > 0) container.db.threads().getById(threadId)?.usage() else null
+        val runs = container.db.scheduleRuns()
+        runs.insert(
+            ScheduleRunEntity(
+                scheduleId = scheduleId, threadId = threadId, startedAt = startedAt,
+                durationMs = System.currentTimeMillis() - startedAt, status = status,
+                inputTokens = usage?.inputTokens ?: 0, outputTokens = usage?.outputTokens ?: 0,
+                costUsd = usage?.costUsd ?: 0.0, costPartial = usage?.partial ?: false,
+            )
+        )
+        runs.prune(scheduleId)
     }
 
     private suspend fun record(id: Long, change: (ScheduleEntity) -> ScheduleEntity) {

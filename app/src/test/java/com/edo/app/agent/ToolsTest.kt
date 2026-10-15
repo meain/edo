@@ -170,17 +170,50 @@ class ToolsTest {
     }
 
     @Test
-    fun httpRequestFetcherReturnsBody() = runTest {
+    fun fetchPageConvertsHtmlToMarkdown() = runTest {
+        val html = """<html><head><title>T</title><script>var x=1;</script></head><body>
+            <nav>menu</nav><article><h1>Head</h1><p>Hello <a href="/rel">world</a> and <strong>bold</strong>.</p>
+            <ul><li>one</li><li>two</li></ul><pre>a < b</pre></article><footer>foot</footer></body></html>"""
         val fake = object : HttpFetcher {
-            override suspend fun fetch(url: String, method: String, headers: Map<String, String>, body: String?): String {
-                return "HTTP 200\n$url $method ${body ?: ""}"
-            }
+            override suspend fun fetch(url: String, method: String, headers: Map<String, String>, body: String?) =
+                "HTTP 200\n$html"
         }
-        val r = HttpRequestTool(fake).invoke("""{"url":"https://x","method":"POST","body":"hi"}""")
+        val r = FetchPageTool(fake).invoke("""{"url":"https://x.com/a"}""")
         assertFalse(r.isError)
-        assertTrue(r.content.contains("https://x"))
-        assertTrue(r.content.contains("POST"))
-        assertTrue(r.content.contains("hi"))
+        assertTrue(r.content, r.content.contains("Title: T"))
+        assertTrue(r.content, r.content.contains("# Head"))
+        assertTrue(r.content, r.content.contains("[world](https://x.com/rel)"))
+        assertTrue(r.content, r.content.contains("**bold**"))
+        assertTrue(r.content, r.content.contains("- one\n- two"))
+        assertTrue(r.content, r.content.contains("```\na < b\n```"))
+        assertFalse(r.content.contains("menu"))
+        assertFalse(r.content.contains("foot"))
+        assertFalse(r.content.contains("var x"))
+    }
+
+    @Test
+    fun fetchPageReturnsNonHtmlUnchangedAndPages() = runTest {
+        val big = "a".repeat(50_000)
+        val fake = object : HttpFetcher {
+            override suspend fun fetch(url: String, method: String, headers: Map<String, String>, body: String?) =
+                "HTTP 200\n$big"
+        }
+        val first = FetchPageTool(fake).invoke("""{"url":"https://x"}""")
+        assertTrue(first.content.contains("call again with offset=40000"))
+        val second = FetchPageTool(fake).invoke("""{"url":"https://x","offset":40000}""")
+        assertEquals("a".repeat(10_000), second.content)
+    }
+
+    @Test
+    fun fetchPageRejectsBadUrlAndHttpErrors() = runTest {
+        val fake = object : HttpFetcher {
+            override suspend fun fetch(url: String, method: String, headers: Map<String, String>, body: String?) =
+                "HTTP 404\nnope"
+        }
+        assertTrue(FetchPageTool(fake).invoke("""{"url":"file:///etc/passwd"}""").isError)
+        val r = FetchPageTool(fake).invoke("""{"url":"https://x"}""")
+        assertTrue(r.isError)
+        assertTrue(r.content.contains("404"))
     }
 
     @Test
@@ -253,13 +286,13 @@ class ToolsTest {
     }
 
     @Test
-    fun httpRequestPropagatesFetcherErrors() = runTest {
+    fun fetchPagePropagatesFetcherErrors() = runTest {
         val fake = object : HttpFetcher {
             override suspend fun fetch(url: String, method: String, headers: Map<String, String>, body: String?): String {
                 throw RuntimeException("boom")
             }
         }
-        val r = HttpRequestTool(fake).invoke("""{"url":"https://x"}""")
+        val r = FetchPageTool(fake).invoke("""{"url":"https://x"}""")
         assertTrue(r.isError)
         assertTrue(r.content.contains("boom"))
     }

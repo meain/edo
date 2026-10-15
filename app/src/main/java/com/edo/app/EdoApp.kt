@@ -31,6 +31,9 @@ class AppContainer(private val app: Application) {
         install(HttpTimeout)
     }
 
+    /** Model prices for the cost meter, from LiteLLM's public table. */
+    val priceBook = com.edo.app.llm.PriceBook(java.io.File(app.filesDir, "model_prices.json"), http)
+
     /** Process-wide scope. Used by long-running agent jobs so they survive
      *  ViewModel teardown (e.g., navigating away within the app or brief
      *  configuration churn). It outlives any individual screen. */
@@ -148,5 +151,6 @@ class EdoApp : Application() {
         // resync: if this process was started by the alarm itself, its run must not be skipped.
         container.appScope.launch { container.scheduler.rearm() }
         container.appScope.launch { container.releaseOrphanGrants() }
+        container.appScope.launch { container.priceBook.refreshIfStale() }
     }
 }

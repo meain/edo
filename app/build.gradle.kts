@@ -91,6 +91,8 @@ dependencies {
     implementation(libs.commonmark.ext.autolink)
 
     implementation(libs.luaj.jse)
+    implementation(libs.jsoup)
+    implementation(libs.readability4j)
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.documentfile)
 

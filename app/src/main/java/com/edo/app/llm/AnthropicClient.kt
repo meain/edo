@@ -27,6 +27,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 class AnthropicClient(
@@ -193,12 +194,24 @@ class AnthropicClient(
         fun parseAnthropicStream(lines: Flow<String>): Flow<LlmEvent> = flow {
             val toolIdsByIndex = mutableMapOf<Int, String>()
             var lastStopReason: String? = null
+            var usage: TokenUsage? = null
 
             parseSse(lines).collect { ev ->
                 val payload = runCatching { DefaultJson.parseToJsonElement(ev.data).jsonObject }
                     .getOrNull() ?: return@collect
 
                 when (ev.event) {
+                    "message_start" -> {
+                        val u = payload["message"]?.jsonObject?.get("usage") as? JsonObject
+                        if (u != null) {
+                            usage = TokenUsage(
+                                inputTokens = u.long("input_tokens"),
+                                outputTokens = u.long("output_tokens"),
+                                cacheReadTokens = u.long("cache_read_input_tokens"),
+                                cacheWriteTokens = u.long("cache_creation_input_tokens"),
+                            )
+                        }
+                    }
                     "content_block_start" -> {
                         val index = payload["index"]?.jsonPrimitive?.int ?: return@collect
                         val block = payload["content_block"]?.jsonObject ?: return@collect
@@ -240,8 +253,12 @@ class AnthropicClient(
                         val delta = payload["delta"]?.jsonObject
                         val reason = delta?.get("stop_reason")?.jsonPrimitive?.contentOrNull
                         if (reason != null) lastStopReason = reason
+                        // message_delta carries the final (cumulative) output count.
+                        val out = (payload["usage"] as? JsonObject)?.get("output_tokens")?.jsonPrimitive?.longOrNull
+                        if (out != null) usage = (usage ?: TokenUsage()).copy(outputTokens = out)
                     }
                     "message_stop" -> {
+                        usage?.let { emit(LlmEvent.Usage(it)) }
                         emit(LlmEvent.TurnEnd(lastStopReason))
                     }
                     "error" -> {

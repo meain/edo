@@ -507,10 +507,12 @@ private fun EditProjectSheet(
     var luaNetwork by rememberSaveable(project.id) { mutableStateOf(project.luaNetwork) }
     var workspaceUri by rememberSaveable(project.id) { mutableStateOf(project.workspaceUri) }
     val global = remember { container.settings.load() }
+    val profiles = remember { container.settings.loadProfiles() }
     var overrideOn by rememberSaveable(project.id) {
-        mutableStateOf(project.modelOverride != null || project.maxTurnsOverride != null)
+        mutableStateOf(project.profileOverride != null || project.maxTurnsOverride != null)
     }
-    var modelText by rememberSaveable(project.id) { mutableStateOf(project.modelOverride ?: global.model) }
+    var profileId by rememberSaveable(project.id) { mutableStateOf(project.profileOverride) }
+    var profileMenu by remember { mutableStateOf(false) }
     var maxTurnsText by rememberSaveable(project.id) {
         mutableStateOf((project.maxTurnsOverride ?: global.maxTurns).toString())
     }
@@ -609,8 +611,8 @@ private fun EditProjectSheet(
             Column(Modifier.weight(1f)) {
                 Text("Override values", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    if (overrideOn) "Model and max turns for this project only"
-                    else "Using global model and max turns",
+                    if (overrideOn) "Profile and max turns for this project only"
+                    else "Using global profile and max turns",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -619,13 +621,31 @@ private fun EditProjectSheet(
         }
         if (overrideOn) {
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = modelText,
-                onValueChange = { modelText = it },
-                label = { Text("Model") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
+            val selected = profiles.firstOrNull { it.id == profileId }
+            Box {
+                OutlinedButton(onClick = { profileMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Profile", style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            selected?.let { "${it.name} · ${it.model}" } ?: "Global (${global.model})",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                androidx.compose.material3.DropdownMenu(expanded = profileMenu, onDismissRequest = { profileMenu = false }) {
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Global (${global.model})") },
+                        onClick = { profileId = null; profileMenu = false },
+                    )
+                    profiles.forEach { p ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("${p.name} · ${p.model}") },
+                            onClick = { profileId = p.id; profileMenu = false },
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = maxTurnsText,
@@ -652,7 +672,7 @@ private fun EditProjectSheet(
                                 yoloMode = yoloMode,
                                 luaNetwork = luaNetwork,
                                 workspaceUri = workspaceUri,
-                                modelOverride = if (overrideOn) modelText.trim().ifBlank { null } else null,
+                                profileOverride = if (overrideOn) profileId else null,
                                 maxTurnsOverride = if (overrideOn) maxTurnsText.toIntOrNull()?.takeIf { it > 0 } else null,
                             )
                         )

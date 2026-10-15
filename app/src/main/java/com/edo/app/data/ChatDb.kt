@@ -25,8 +25,8 @@ data class ProjectEntity(
     @ColumnInfo(name = "workspace_uri") val workspaceUri: String,
     @ColumnInfo(name = "description", defaultValue = "") val description: String = "",
     @ColumnInfo(name = "yolo_mode", defaultValue = "0") val yoloMode: Boolean = false,
-    /** Null means "use the global setting". */
-    @ColumnInfo(name = "model_override") val modelOverride: String? = null,
+    /** Id of a saved [ModelProfile] to use for this project; null means "use the global setting". */
+    @ColumnInfo(name = "profile_override") val profileOverride: Long? = null,
     @ColumnInfo(name = "max_turns_override") val maxTurnsOverride: Int? = null,
     /**
      * Opt-in: lets the `run_lua` tool make HTTP requests. Lua itself (compute plus read/write inside
@@ -62,6 +62,11 @@ data class ThreadEntity(
     @ColumnInfo(name = "title") val title: String = "New chat",
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "last_updated_at") val lastUpdatedAt: Long = System.currentTimeMillis(),
+    /** Running token and cost totals; see [UsageTotals]. */
+    @ColumnInfo(name = "input_tokens", defaultValue = "0") val inputTokens: Long = 0,
+    @ColumnInfo(name = "output_tokens", defaultValue = "0") val outputTokens: Long = 0,
+    @ColumnInfo(name = "cost_usd", defaultValue = "0") val costUsd: Double = 0.0,
+    @ColumnInfo(name = "cost_partial", defaultValue = "0") val costPartial: Boolean = false,
 )
 
 @Dao
@@ -103,6 +108,12 @@ interface ThreadDao {
 
     @Query("UPDATE threads SET last_updated_at = :ts WHERE id = :id")
     suspend fun touch(id: Long, ts: Long = System.currentTimeMillis())
+
+    @Query(
+        "UPDATE threads SET input_tokens = input_tokens + :inputTokens, output_tokens = output_tokens + :outputTokens, " +
+            "cost_usd = cost_usd + :costUsd, cost_partial = MAX(cost_partial, :partial) WHERE id = :id"
+    )
+    suspend fun addUsage(id: Long, inputTokens: Long, outputTokens: Long, costUsd: Double, partial: Boolean)
 }
 
 @Entity(tableName = "messages")
@@ -189,9 +200,54 @@ interface ScheduleDao {
     suspend fun deleteForProject(projectId: Long)
 }
 
+/** One finished (or skipped) firing of a schedule; only the newest [ScheduleRunDao.KEEP] are kept. */
+@Entity(tableName = "schedule_runs", indices = [Index("schedule_id")])
+data class ScheduleRunEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "schedule_id") val scheduleId: Long,
+    /** The chat the run happened in, or 0 when none was created (skipped). */
+    @ColumnInfo(name = "thread_id") val threadId: Long,
+    @ColumnInfo(name = "started_at") val startedAt: Long,
+    @ColumnInfo(name = "duration_ms") val durationMs: Long,
+    /** OK, FAILED, TIMEOUT or SKIPPED. */
+    @ColumnInfo(name = "status") val status: String,
+    @ColumnInfo(name = "input_tokens") val inputTokens: Long = 0,
+    @ColumnInfo(name = "output_tokens") val outputTokens: Long = 0,
+    @ColumnInfo(name = "cost_usd") val costUsd: Double = 0.0,
+    @ColumnInfo(name = "cost_partial") val costPartial: Boolean = false,
+)
+
+@Dao
+interface ScheduleRunDao {
+    @Query("SELECT * FROM schedule_runs WHERE schedule_id = :scheduleId ORDER BY started_at DESC")
+    fun observeForSchedule(scheduleId: Long): Flow<List<ScheduleRunEntity>>
+
+    @Insert
+    suspend fun insert(r: ScheduleRunEntity): Long
+
+    @Query(
+        "DELETE FROM schedule_runs WHERE schedule_id = :scheduleId AND id NOT IN " +
+            "(SELECT id FROM schedule_runs WHERE schedule_id = :scheduleId ORDER BY started_at DESC LIMIT :keep)"
+    )
+    suspend fun prune(scheduleId: Long, keep: Int = KEEP)
+
+    @Query("DELETE FROM schedule_runs WHERE schedule_id = :scheduleId")
+    suspend fun deleteForSchedule(scheduleId: Long)
+
+    @Query("DELETE FROM schedule_runs WHERE schedule_id IN (SELECT id FROM schedules WHERE project_id = :projectId)")
+    suspend fun deleteForProject(projectId: Long)
+
+    companion object {
+        const val KEEP = 30
+    }
+}
+
 @Database(
-    entities = [ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class],
-    version = 8,
+    entities = [
+        ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class,
+        ScheduleRunEntity::class,
+    ],
+    version = 10,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -199,6 +255,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun threads(): ThreadDao
     abstract fun messages(): MessageDao
     abstract fun schedules(): ScheduleDao
+    abstract fun scheduleRuns(): ScheduleRunDao
 
     companion object {
         @Volatile private var instance: ChatDatabase? = null
@@ -257,13 +314,67 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v8 → v9: a project picks a saved profile instead of a free-text model. The table is rebuilt
+         * because minSdk 31 ships SQLite without DROP COLUMN; the old model override has no profile to
+         * map to, so it is dropped.
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE projects_new (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "name TEXT NOT NULL, " +
+                        "workspace_uri TEXT NOT NULL, " +
+                        "description TEXT NOT NULL DEFAULT '', " +
+                        "yolo_mode INTEGER NOT NULL DEFAULT 0, " +
+                        "profile_override INTEGER, " +
+                        "max_turns_override INTEGER, " +
+                        "lua_enabled INTEGER NOT NULL DEFAULT 0, " +
+                        "created_at INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "INSERT INTO projects_new (id, name, workspace_uri, description, yolo_mode, " +
+                        "max_turns_override, lua_enabled, created_at) " +
+                        "SELECT id, name, workspace_uri, description, yolo_mode, " +
+                        "max_turns_override, lua_enabled, created_at FROM projects"
+                )
+                db.execSQL("DROP TABLE projects")
+                db.execSQL("ALTER TABLE projects_new RENAME TO projects")
+            }
+        }
+
+        /** v9 → v10: token / cost totals on threads, and the per-schedule run history. */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE threads ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE threads ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE threads ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE threads ADD COLUMN cost_partial INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS schedule_runs (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "schedule_id INTEGER NOT NULL, " +
+                        "thread_id INTEGER NOT NULL, " +
+                        "started_at INTEGER NOT NULL, " +
+                        "duration_ms INTEGER NOT NULL, " +
+                        "status TEXT NOT NULL, " +
+                        "input_tokens INTEGER NOT NULL, " +
+                        "output_tokens INTEGER NOT NULL, " +
+                        "cost_usd REAL NOT NULL, " +
+                        "cost_partial INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_schedule_runs_schedule_id ON schedule_runs (schedule_id)")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }
