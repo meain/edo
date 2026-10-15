@@ -49,7 +49,7 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 
 - Both clients emit `LlmEvent.Usage` (Anthropic from `message_start`/`message_delta`; OpenAI-style needs `stream_options.include_usage`, and OpenRouter also `usage.include` for its own `cost`). `ChatSession.recordUsage` adds each turn to the thread (`ThreadEntity.inputTokens/outputTokens/costUsd/costPartial`), shown under the project name in the chat top bar. Chat-title generation is not counted.
 - Cost is the provider-reported figure, else `PriceBook` (LiteLLM `model_prices_and_context_window.json`, cached in `filesDir`, refreshed weekly). A model with no price adds tokens but no cost and sets `costPartial`, shown as `$0.04+`.
-- `ScheduleRunEntity` (`schedule_runs`) gets one row per run, including skipped and failed ones, copying the thread totals; the newest 30 per schedule are kept. The history icon on a schedule row lists them and opens the run's chat.
+- `ScheduleRunEntity` (`schedule_runs`) gets one row per run, including skipped and failed ones, copying the thread totals; the newest 30 per schedule are kept, while `ScheduleEntity.total*` holds lifetime totals (bumped by `ScheduleDao.addUsage`, preserved by `ScheduleManager.save`) and shows as "All runs" on the row and in the history dialog. The history icon on a schedule row lists them and opens the run's chat.
 
 ## Skills
 

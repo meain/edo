@@ -168,6 +168,11 @@ data class ScheduleEntity(
     @ColumnInfo(name = "last_status") val lastStatus: String = "",
     @ColumnInfo(name = "last_thread_id") val lastThreadId: Long = 0,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+    /** Lifetime usage of all runs, including ones already pruned from the run history. */
+    @ColumnInfo(name = "total_input_tokens", defaultValue = "0") val totalInputTokens: Long = 0,
+    @ColumnInfo(name = "total_output_tokens", defaultValue = "0") val totalOutputTokens: Long = 0,
+    @ColumnInfo(name = "total_cost_usd", defaultValue = "0") val totalCostUsd: Double = 0.0,
+    @ColumnInfo(name = "total_cost_partial", defaultValue = "0") val totalCostPartial: Boolean = false,
 )
 
 @Dao
@@ -198,6 +203,14 @@ interface ScheduleDao {
 
     @Query("DELETE FROM schedules WHERE project_id = :projectId")
     suspend fun deleteForProject(projectId: Long)
+
+    /** Adds one run's usage to the schedule's lifetime totals without touching its other fields. */
+    @Query(
+        "UPDATE schedules SET total_input_tokens = total_input_tokens + :inputTokens, " +
+            "total_output_tokens = total_output_tokens + :outputTokens, total_cost_usd = total_cost_usd + :costUsd, " +
+            "total_cost_partial = MAX(total_cost_partial, :partial) WHERE id = :id"
+    )
+    suspend fun addUsage(id: Long, inputTokens: Long, outputTokens: Long, costUsd: Double, partial: Boolean)
 }
 
 /** One finished (or skipped) firing of a schedule; only the newest [ScheduleRunDao.KEEP] are kept. */
@@ -247,7 +260,7 @@ interface ScheduleRunDao {
         ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class,
         ScheduleRunEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -368,13 +381,30 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v10 → v11: lifetime usage totals on schedules, seeded from the history kept so far. */
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE schedules ADD COLUMN total_input_tokens INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE schedules ADD COLUMN total_output_tokens INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE schedules ADD COLUMN total_cost_usd REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE schedules ADD COLUMN total_cost_partial INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "UPDATE schedules SET " +
+                        "total_input_tokens = (SELECT COALESCE(SUM(input_tokens), 0) FROM schedule_runs WHERE schedule_id = schedules.id), " +
+                        "total_output_tokens = (SELECT COALESCE(SUM(output_tokens), 0) FROM schedule_runs WHERE schedule_id = schedules.id), " +
+                        "total_cost_usd = (SELECT COALESCE(SUM(cost_usd), 0) FROM schedule_runs WHERE schedule_id = schedules.id), " +
+                        "total_cost_partial = (SELECT COALESCE(MAX(cost_partial), 0) FROM schedule_runs WHERE schedule_id = schedules.id)"
+                )
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }

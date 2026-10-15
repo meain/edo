@@ -36,6 +36,9 @@ fun ThreadEntity.usage() = UsageTotals(inputTokens, outputTokens, costUsd, costP
 
 fun ScheduleRunEntity.usage() = UsageTotals(inputTokens, outputTokens, costUsd, costPartial)
 
+/** Lifetime usage of every run of this schedule. */
+fun ScheduleEntity.totalUsage() = UsageTotals(totalInputTokens, totalOutputTokens, totalCostUsd, totalCostPartial)
+
 fun formatTokens(n: Long): String = when {
     n >= 1_000_000 -> String.format(Locale.US, "%.1fM", n / 1_000_000.0)
     n >= 1_000 -> String.format(Locale.US, "%.1fk", n / 1_000.0)

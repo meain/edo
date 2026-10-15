@@ -43,7 +43,14 @@ class ScheduleManager(private val app: Application, private val container: AppCo
             once -> s.nextRunAt.takeIf { it > now } ?: 0L
             else -> nextRunAfter(s, now) ?: 0L
         }
-        val toSave = s.copy(nextRunAt = next, enabled = s.enabled && next > 0)
+        // The editor and the toggle hand us a copy that may predate a run; lifetime usage is
+        // only ever changed by addUsage, so keep whatever the table has.
+        val current = if (s.id != 0L) dao.getById(s.id) else null
+        val toSave = s.copy(
+            nextRunAt = next, enabled = s.enabled && next > 0,
+            totalInputTokens = current?.totalInputTokens ?: 0, totalOutputTokens = current?.totalOutputTokens ?: 0,
+            totalCostUsd = current?.totalCostUsd ?: 0.0, totalCostPartial = current?.totalCostPartial ?: false,
+        )
         val id = if (s.id == 0L) dao.insert(toSave) else toSave.also { dao.update(it) }.id
         rearm()
         return id
@@ -185,6 +192,9 @@ class ScheduleManager(private val app: Application, private val container: AppCo
             )
         )
         runs.prune(scheduleId)
+        if (usage != null) {
+            dao.addUsage(scheduleId, usage.inputTokens, usage.outputTokens, usage.costUsd, usage.partial)
+        }
     }
 
     private suspend fun record(id: Long, change: (ScheduleEntity) -> ScheduleEntity) {

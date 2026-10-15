@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -32,10 +33,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -76,6 +80,7 @@ import androidx.core.content.ContextCompat
 import com.edo.app.AppContainer
 import com.edo.app.data.ScheduleEntity
 import com.edo.app.data.usage
+import com.edo.app.data.totalUsage
 import com.edo.app.schedule.MIN_INTERVAL_MINUTES
 import com.edo.app.schedule.ScheduleKind
 import kotlinx.coroutines.flow.flowOf
@@ -287,6 +292,15 @@ private fun ScheduleRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (!s.totalUsage().isEmpty) {
+                Text(
+                    "All runs: ${s.totalUsage().label()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             val last = if (running) "Running…" else lastRunLabel(s)
             if (last.isNotEmpty()) {
                 Text(
@@ -298,18 +312,32 @@ private fun ScheduleRow(
                 )
             }
         }
-        IconButton(onClick = onRunNow, enabled = !running, modifier = Modifier.size(36.dp)) {
-            if (running) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(Icons.Filled.PlayArrow, "Run now", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (running) {
+            CircularProgressIndicator(modifier = Modifier.padding(horizontal = 8.dp).size(18.dp), strokeWidth = 2.dp)
+        }
+        var menuOpen by remember { mutableStateOf(false) }
+        Box {
+            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Filled.MoreVert, "More", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-        IconButton(onClick = onHistory, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Filled.History, "Run history", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Filled.Delete, "Delete", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Run now") },
+                    leadingIcon = { Icon(Icons.Filled.PlayArrow, null) },
+                    enabled = !running,
+                    onClick = { menuOpen = false; onRunNow() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Run history") },
+                    leadingIcon = { Icon(Icons.Filled.History, null) },
+                    onClick = { menuOpen = false; onHistory() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                    leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                    onClick = { menuOpen = false; onDelete() },
+                )
+            }
         }
         Switch(checked = s.enabled, onCheckedChange = onToggle, modifier = Modifier.padding(horizontal = 8.dp))
     }
@@ -560,6 +588,16 @@ private fun RunHistoryDialog(
                 Text("No runs yet.", style = MaterialTheme.typography.bodyMedium)
             } else {
                 LazyColumn {
+                    if (!s.totalUsage().isEmpty) {
+                        item {
+                            Text(
+                                "All runs: ${s.totalUsage().label()}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 4.dp),
+                            )
+                        }
+                    }
                     items(runs, key = { it.id }) { r ->
                         val failed = r.status == "FAILED" || r.status == "TIMEOUT"
                         Column(

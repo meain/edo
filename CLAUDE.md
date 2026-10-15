@@ -5,7 +5,7 @@ Claude-Code-style agent app for Android. Kotlin + Jetpack Compose, Material 3 wi
 ## Architecture
 
 - `app/src/main/java/com/edo/app/`
-  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`; currently v10), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
+  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`; currently v11), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
   - `llm/` — `AnthropicClient`, `OpenAIClient` (also used for OpenRouter, with `OpenRouterOptions.requestExtras`), `fetchModelIds` for model autocomplete, shared `LlmClient` + streaming `LlmEvent` types
   - `agent/` — `Agent` loop, `ApprovalGate`, tools, `SafWorkspace` / `FileWorkspace` / `InMemoryWorkspace`
   - `schedule/` — `ScheduleManager` (save/run/re-arm), `Recurrence` (next-run maths), `ScheduleReceiver` (alarm + boot/time broadcasts), `ScheduleNotifier`
@@ -49,7 +49,7 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 
 - Both clients emit `LlmEvent.Usage` (Anthropic from `message_start`/`message_delta`; OpenAI-style needs `stream_options.include_usage`, and OpenRouter also `usage.include` for its own `cost`). `ChatSession.recordUsage` adds each turn to the thread (`ThreadEntity.inputTokens/outputTokens/costUsd/costPartial`), shown under the project name in the chat top bar. Chat-title generation is not counted.
 - Cost is the provider-reported figure, else `PriceBook` (LiteLLM `model_prices_and_context_window.json`, cached in `filesDir`, refreshed weekly). A model with no price adds tokens but no cost and sets `costPartial`, shown as `$0.04+`.
-- `ScheduleRunEntity` (`schedule_runs`) gets one row per run, including skipped and failed ones, copying the thread totals; the newest 30 per schedule are kept. The history icon on a schedule row lists them and opens the run's chat.
+- `ScheduleRunEntity` (`schedule_runs`) gets one row per run, including skipped and failed ones, copying the thread totals; the newest 30 per schedule are kept, while `ScheduleEntity.total*` holds lifetime totals (bumped by `ScheduleDao.addUsage`, preserved by `ScheduleManager.save`) and shows as "All runs" on the row and in the history dialog. The history icon on a schedule row lists them and opens the run's chat.
 
 ## Skills
 
@@ -112,4 +112,4 @@ Each project's agent must only reach its own folder. The OS boundary is the per-
 - A file sent with a message is inlined as an `<attached_file>` block (`AttachedFiles.kt`); there is no file on disk, so opening it externally writes the text to the cache first.
 - Anything handed to another app through `FileProvider` must live under a directory declared in `res/xml/file_paths.xml` (`captures/`, `open/`), or `getUriForFile` throws.
 - OpenRouter extras are plain request-body fields (`provider.only/ignore/sort/...`, `models`, `reasoning`) merged over the normal body; the user's raw JSON wins. The field names were written from memory, not checked against OpenRouter's current docs.
-- Room uses explicit migrations (3→4 … 9→10) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.
+- Room uses explicit migrations (3→4 … 10→11) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.
