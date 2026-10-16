@@ -2,9 +2,28 @@
 
 A Claude Code-style agent app for Android. Edo gives you a chat-driven coding agent that operates on a folder you pick on your device — read, write, edit, grep files, call HTTP APIs, and more, with optional per-tool approval gates.
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/99350ad1-97b6-4fd4-934b-782de5f5dd8e" width="320" alt="Edo screenshot" />
-</p>
+<table align="center">
+  <tr>
+    <th align="center">Chat</th>
+    <th align="center">Chats</th>
+    <th align="center">Files</th>
+  </tr>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/d792db43-0a2b-4a29-85f7-3ffe170ca1be" width="220" alt="Edo chat screen with an assistant reply rendered as Markdown headings and bullet lists" /></td>
+    <td><img src="https://github.com/user-attachments/assets/ac5b22bb-cb46-438a-a84e-1de9aadac6e8" width="220" alt="Chat list panel with the project card, a New chat button and recent chats grouped by day, with Stats and Settings icons in the header" /></td>
+    <td><img src="https://github.com/user-attachments/assets/28d532e3-e182-4ffb-8ce4-db91d00baa7e" width="220" alt="File browser panel for the project workspace with a breadcrumb row and a short list of files and folders" /></td>
+  </tr>
+  <tr>
+    <th align="center">Schedule</th>
+    <th align="center">Project settings</th>
+    <th align="center">Stats</th>
+  </tr>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/1bed98c4-a58f-4588-ae48-5fa1e8c2eb49" width="220" alt="Edit schedule sheet for a daily 08:00 schedule with its prompt filled in" /></td>
+    <td><img src="https://github.com/user-attachments/assets/fdaba801-4cc6-4059-abef-e0c1d2a01f57" width="220" alt="Project settings sheet with name, description, workspace folder and toggles for YOLO mode, Lua network access and override values" /></td>
+    <td><img src="https://github.com/user-attachments/assets/fd4bcbb4-d524-4caf-8b0d-ffd251427c98" width="220" alt="Stats page with all-time, 7-day and 30-day spend and token totals, followed by spend-over-time and messages-over-time bar charts" /></td>
+  </tr>
+</table>
 
 ## Features
 
