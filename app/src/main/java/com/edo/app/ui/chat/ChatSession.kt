@@ -299,8 +299,8 @@ class ChatSession internal constructor(
         val title = try {
             val sb = StringBuilder()
             buildLlm(settings).stream(
-                "You name chat conversations. Reply with only a short title of 2 to 5 words, " +
-                    "no quotes, no trailing punctuation.",
+                "You name chat conversations. Reply with only a title of 1 to 3 words. " +
+                    "Never use more than 3 words. No quotes, no trailing punctuation, no explanation.",
                 listOf(ConvMessage(Role.User, listOf(Block.Text(prompt)))),
                 emptyList(),
             ).collect { ev ->
