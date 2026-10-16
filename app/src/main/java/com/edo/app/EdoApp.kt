@@ -11,7 +11,7 @@ import com.edo.app.data.SettingsStore
 import com.edo.app.schedule.ScheduleManager
 import com.edo.app.ui.chat.ChatSessions
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,9 +26,9 @@ import kotlinx.coroutines.launch
 class AppContainer(private val app: Application) {
     val settings: SettingsStore = EncryptedSettingsStore(app)
     val db: ChatDatabase = ChatDatabase.get(app)
-    val http: HttpClient = HttpClient(CIO) {
+    val http: HttpClient = HttpClient(OkHttp) {
         expectSuccess = false
-        install(HttpTimeout)
+        install(HttpTimeout) { connectTimeoutMillis = 30_000 }
     }
 
     /** Model prices for the cost meter, from LiteLLM's public table. */
