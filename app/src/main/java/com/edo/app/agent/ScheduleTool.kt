@@ -20,8 +20,7 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 /**
- * Lets the agent manage scheduled prompts for the current project. Not offered to scheduled
- * runs themselves, so a schedule can't spawn more schedules.
+ * Lets the agent manage scheduled prompts for the current project, including from scheduled runs.
  */
 class ScheduleTool(
     private val scheduler: ScheduleManager,

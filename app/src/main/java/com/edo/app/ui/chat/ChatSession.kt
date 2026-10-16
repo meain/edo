@@ -346,8 +346,7 @@ class ChatSession internal constructor(
         }
         val tools = ToolRegistry(
             listOfNotNull(
-                // Scheduled runs don't get it, so a schedule can't create more schedules.
-                if (unattended) null else ScheduleTool(container.scheduler, projectId),
+                ScheduleTool(container.scheduler, projectId),
                 ReadTool(ws),
                 WriteFileTool(ws),
                 EditFileTool(ws),
