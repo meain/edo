@@ -5,7 +5,7 @@ Claude-Code-style agent app for Android. Kotlin + Jetpack Compose, Material 3 wi
 ## Architecture
 
 - `app/src/main/java/com/edo/app/`
-  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`, `ScheduleRunEntity`, `UsageEventEntity`; currently v14), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
+  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`, `ScheduleRunEntity`, `UsageEventEntity`; currently v15), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
   - `llm/` — `AnthropicClient`, `OpenAIClient` (also used for OpenRouter, with `OpenRouterOptions.requestExtras`), `fetchModelIds` for model autocomplete, shared `LlmClient` + streaming `LlmEvent` types
   - `agent/` — `Agent` loop, `ApprovalGate`, tools, `SafWorkspace` / `FileWorkspace` / `InMemoryWorkspace`
   - `schedule/` — `ScheduleManager` (save/run/re-arm), `Recurrence` (next-run maths), `ScheduleReceiver` (alarm + boot/time broadcasts), `ScheduleNotifier`
@@ -121,4 +121,4 @@ Each project's agent must only reach its own folder. The OS boundary is the per-
 - A file sent with a message is inlined as an `<attached_file>` block (`AttachedFiles.kt`); there is no file on disk, so opening it externally writes the text to the cache first.
 - Anything handed to another app through `FileProvider` must live under a directory declared in `res/xml/file_paths.xml` (`captures/`, `open/`), or `getUriForFile` throws.
 - OpenRouter extras are plain request-body fields (`provider.only/ignore/sort/...`, `models`, `reasoning`) merged over the normal body; the user's raw JSON wins. The field names were written from memory, not checked against OpenRouter's current docs.
-- Room uses explicit migrations (3→4 … 13→14) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.
+- Room uses explicit migrations (3→4 … 14→15) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.

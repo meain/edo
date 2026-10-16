@@ -130,6 +130,8 @@ data class MessageEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
     /** Model that wrote an assistant message; blank for user messages and for rows from before v14. */
     @ColumnInfo(name = "model", defaultValue = "") val model: String = "",
+    /** Provider that served an assistant message; blank for user messages and for rows from before v15. */
+    @ColumnInfo(name = "provider", defaultValue = "") val provider: String = "",
 )
 
 /** A message's time, project and model: all the stats charts need from it. */
@@ -138,12 +140,13 @@ data class MessageStamp(
     @ColumnInfo(name = "project_id") val projectId: Long,
     @ColumnInfo(name = "role") val role: String,
     @ColumnInfo(name = "model") val model: String,
+    @ColumnInfo(name = "provider") val provider: String,
 )
 
 @Dao
 interface MessageDao {
     @Query(
-        "SELECT m.created_at, t.project_id, m.role, m.model FROM messages m " +
+        "SELECT m.created_at, t.project_id, m.role, m.model, m.provider FROM messages m " +
             "JOIN threads t ON t.id = m.thread_id"
     )
     suspend fun stamps(): List<MessageStamp>
@@ -269,6 +272,8 @@ data class UsageEventEntity(
     @ColumnInfo(name = "project_id") val projectId: Long,
     @ColumnInfo(name = "thread_id") val threadId: Long,
     @ColumnInfo(name = "model") val model: String,
+    /** Blank for rows from before v15. */
+    @ColumnInfo(name = "provider", defaultValue = "") val provider: String = "",
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "input_tokens") val inputTokens: Long,
     @ColumnInfo(name = "output_tokens") val outputTokens: Long,
@@ -319,7 +324,7 @@ interface ScheduleRunDao {
         ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class,
         ScheduleRunEntity::class, UsageEventEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -489,13 +494,21 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v14 → v15: record which provider served each response, for the stats breakdown. */
+        private val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN provider TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE usage_events ADD COLUMN provider TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }

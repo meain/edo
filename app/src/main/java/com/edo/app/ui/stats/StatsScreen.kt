@@ -96,14 +96,22 @@ fun StatsScreen(container: AppContainer, onBack: () -> Unit, onOpenChat: () -> U
     fun projectName(id: Long) = projectNames[id] ?: "Deleted project"
     val costChart = remember(events, period, groupBy, projectNames) {
         stack(period, now, groupBy, events.map {
-            Sample(it.createdAt, it.costUsd, if (groupBy == GroupBy.Project) projectName(it.projectId) else it.model.ifBlank { "unknown" })
+            Sample(it.createdAt, it.costUsd, when (groupBy) {
+                GroupBy.Project -> projectName(it.projectId)
+                GroupBy.Provider -> it.provider.ifBlank { "unknown (older)" }
+                else -> it.model.ifBlank { "unknown" }
+            })
         })
     }
     val messageChart = remember(messageStats.stamps, period, groupBy, projectNames) {
         // Only assistant messages carry a model, so the model view counts replies alone.
-        val source = if (groupBy == GroupBy.Model) messageStats.stamps.filter { it.role == "Assistant" } else messageStats.stamps
+        val source = if (groupBy == GroupBy.Model || groupBy == GroupBy.Provider) messageStats.stamps.filter { it.role == "Assistant" } else messageStats.stamps
         stack(period, now, groupBy, source.map {
-            Sample(it.createdAt, 1.0, if (groupBy == GroupBy.Project) projectName(it.projectId) else it.model.ifBlank { "unknown (older)" })
+            Sample(it.createdAt, 1.0, when (groupBy) {
+                GroupBy.Project -> projectName(it.projectId)
+                GroupBy.Provider -> it.provider.ifBlank { "unknown (older)" }
+                else -> it.model.ifBlank { "unknown (older)" }
+            })
         })
     }
 
@@ -158,13 +166,23 @@ fun StatsScreen(container: AppContainer, onBack: () -> Unit, onOpenChat: () -> U
                         emptyText = "No messages in this range.",
                         label = { it.toLong().toString() },
                     )
-                    if (groupBy == GroupBy.Model) Note("Model view counts assistant replies; replies from before models were recorded show as unknown.")
+                    if (groupBy == GroupBy.Model || groupBy == GroupBy.Provider) Note("Model and provider views count assistant replies; older replies show as unknown.")
                 }
             }
             if (stats.perModel.isNotEmpty()) {
                 item {
                     Section("Cost by model", "Per-response log, so only usage since model logging started") {
-                        stats.perModel.forEach { (model, u) -> UsageRow(model.ifBlank { "unknown" }, u.label(), u) }
+                        stats.perModel.forEach { (key, u) ->
+                            val (provider, model) = key
+                            UsageRow(model.ifBlank { "unknown" }, listOfNotNull(provider.ifBlank { null }, u.label()).joinToString(" · "), u)
+                        }
+                    }
+                }
+            }
+            if (stats.perProvider.isNotEmpty()) {
+                item {
+                    Section("Cost by provider", "Per-response log; older usage has no provider") {
+                        stats.perProvider.forEach { (provider, u) -> UsageRow(provider.ifBlank { "unknown (older)" }, u.label(), u) }
                     }
                 }
             }
@@ -246,7 +264,8 @@ private data class Stats(
     val chats: Int,
     val scheduled: Int,
     val perProject: List<Triple<String, Int, UsageTotals>>,
-    val perModel: List<Pair<String, UsageTotals>>,
+    val perModel: List<Pair<Pair<String, String>, UsageTotals>>,
+    val perProvider: List<Pair<String, UsageTotals>>,
     val eventCount: Int,
     val topChats: List<ThreadEntity>,
     val scheduleRuns: Int,
@@ -275,11 +294,13 @@ private fun compute(
         Triple(p.name, own.size, sum(own))
     }.sortedByDescending { it.third.costUsd }
 
-    val perModel = events.groupBy { it.model }.map { (m, list) ->
-        m to list.fold(UsageTotals()) { acc, e ->
-            acc + UsageTotals(e.inputTokens, e.outputTokens, e.costUsd, e.costPartial)
-        }
-    }.sortedByDescending { it.second.costUsd }
+    fun total(list: List<UsageEventEntity>) = list.fold(UsageTotals()) { acc, e ->
+        acc + UsageTotals(e.inputTokens, e.outputTokens, e.costUsd, e.costPartial)
+    }
+    val perModel = events.groupBy { it.provider to it.model }.map { (k, list) -> k to total(list) }
+        .sortedByDescending { it.second.costUsd }
+    val perProvider = events.groupBy { it.provider }.map { (p, list) -> p to total(list) }
+        .sortedByDescending { it.second.costUsd }
 
     val perSchedule = runs.groupBy { it.scheduleId }.map { (id, list) ->
         Triple(id, list.size, list.fold(UsageTotals()) { acc, r -> acc + r.usage() })
@@ -294,6 +315,7 @@ private fun compute(
         scheduled = threads.count { it.fromSchedule },
         perProject = perProject,
         perModel = perModel,
+        perProvider = perProvider,
         eventCount = events.size,
         topChats = threads.filter { it.costUsd > 0 }.sortedByDescending { it.costUsd }.take(5),
         scheduleRuns = runs.size,
@@ -337,7 +359,7 @@ private fun UsageRow(name: String, detail: String, usage: UsageTotals, onClick: 
 }
 
 /** What a chart's bars are split by. */
-private enum class GroupBy(val title: String) { Total("Total"), Project("Project"), Model("Model") }
+private enum class GroupBy(val title: String) { Total("Total"), Project("Project"), Model("Model"), Provider("Provider") }
 
 private class Sample(val ts: Long, val value: Double, val series: String)
 
@@ -450,7 +472,7 @@ private fun ChartControls(period: Period, onPeriod: (Period) -> Unit, groupBy: G
             FilterChip(
                 selected = g == groupBy,
                 onClick = { onGroupBy(g) },
-                label = { Text(if (g == GroupBy.Total) "Total" else "By ${g.title.lowercase()}") },
+                label = { Text(g.title, maxLines = 1) },
             )
         }
     }

@@ -484,7 +484,7 @@ class ChatSession internal constructor(
         container.db.threads().addUsage(threadId, input, u.outputTokens, cost ?: 0.0, cost == null)
         container.db.usageEvents().insert(
             UsageEventEntity(
-                projectId = projectId, threadId = threadId, model = runModel,
+                projectId = projectId, threadId = threadId, model = runModel, provider = runProvider.name,
                 inputTokens = input, outputTokens = u.outputTokens, cacheReadTokens = u.cacheReadTokens,
                 costUsd = cost ?: 0.0, costPartial = cost == null,
             )
@@ -499,7 +499,7 @@ class ChatSession internal constructor(
         for (msg in newItems) {
             val row = uiToRow(msg, threadId)
             val rowId = container.db.messages().insert(
-                if (msg.role == Role.Assistant) row.copy(model = runModel) else row
+                if (msg.role == Role.Assistant) row.copy(model = runModel, provider = runProvider.name) else row
             )
             uiMsgs = uiMsgs + UiMessage(rowId, msg.role, msg.blocks)
         }
