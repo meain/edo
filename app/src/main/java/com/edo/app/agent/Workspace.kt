@@ -38,7 +38,13 @@ interface Workspace {
     /** Content URI for a file, when available (used by the file manager's "open with"). */
     fun uriFor(path: String): Uri? = null
 
-    data class Entry(val name: String, val isDir: Boolean, val size: Long)
+    /** Create a directory (and missing parents). True if it exists afterwards. */
+    fun mkdir(path: String): Boolean = false
+    /** Rename the file or folder at [path] to [newName] (a bare name, same parent). */
+    fun rename(path: String, newName: String): Boolean = false
+
+    /** [modified] is epoch millis, 0 when unknown. */
+    data class Entry(val name: String, val isDir: Boolean, val size: Long, val modified: Long = 0L)
     data class TextFile(val path: String, val content: String)
 }
 
@@ -108,8 +114,29 @@ class SafWorkspace(
                 name = it.name ?: "?",
                 isDir = it.isDirectory,
                 size = if (it.isFile) it.length() else 0L,
+                modified = it.lastModified(),
             )
         }
+    }
+
+    override fun mkdir(path: String): Boolean {
+        val parts = WorkspaceScope.safeSegments(path) ?: return false
+        var cur: DocumentFile = root ?: return false
+        for (name in parts) {
+            val next = cur.findFile(name)
+            cur = when {
+                next == null -> cur.createDirectory(name) ?: return false
+                next.isDirectory -> next
+                else -> return false
+            }
+        }
+        return true
+    }
+
+    override fun rename(path: String, newName: String): Boolean {
+        val file = resolve(path) ?: return false
+        if (file == root) return false
+        return runCatching { file.renameTo(newName) }.getOrElse { false }
     }
 
     override fun walkTextFiles(path: String): Sequence<Workspace.TextFile> = sequence {
@@ -201,8 +228,21 @@ class FileWorkspace(private val root: java.io.File) : Workspace {
         val dir = if (path.isBlank() || path == "/" || path == ".") root else resolve(path)
         if (dir == null || !dir.isDirectory) return null
         return dir.listFiles()?.map {
-            Workspace.Entry(it.name, it.isDirectory, if (it.isFile) it.length() else 0L)
+            Workspace.Entry(it.name, it.isDirectory, if (it.isFile) it.length() else 0L, it.lastModified())
         } ?: emptyList()
+    }
+
+    override fun mkdir(path: String): Boolean {
+        val f = resolve(path) ?: return false
+        return f.isDirectory || runCatching { f.mkdirs() }.getOrElse { false }
+    }
+
+    override fun rename(path: String, newName: String): Boolean {
+        val f = resolve(path) ?: return false
+        if (f == root || '/' in newName) return false
+        val target = java.io.File(f.parentFile ?: return false, newName)
+        if (target.exists()) return false
+        return runCatching { f.renameTo(target) }.getOrElse { false }
     }
 
     override fun walkTextFiles(path: String): Sequence<Workspace.TextFile> = sequence {
