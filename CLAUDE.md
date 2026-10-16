@@ -74,7 +74,9 @@ nix develop --command bash -c './gradlew --no-daemon :app:testDebugUnitTest'
 nix develop --command bash -c './gradlew --no-daemon :app:compileDebugKotlin'   # fastest sanity check
 ```
 
-The release variant is unsigned and not minified. To install one over a debug build without wiping data, zipalign it and sign with `~/.android/debug.keystore` (`apksigner`).
+The `Makefile` wraps these (`make` lists targets): `make test`, `make install-debug`, `make install-release`; the device defaults to the first mDNS entry in `adb devices` (override with `DEVICE=`).
+
+The release variant is unsigned and not minified. `make install-release` zipaligns it and signs with `~/.android/debug.keystore` (`apksigner`), so it installs over a debug build without wiping data.
 
 Judge scroll smoothness on a release build: the debug build is visibly jittery on its own.
 
