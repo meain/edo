@@ -14,11 +14,14 @@ import java.io.File
  * our workspace paths and `file://` URIs are blocked across apps.
  */
 fun openExternally(context: Context, name: String, source: Uri) {
-    val uri = if (source.scheme == "file") {
+    val isCopy = source.scheme == "file"
+    val uri = if (isCopy) {
         val from = File(source.path ?: return toast(context, "Can't open this file"))
         copyToCache(context, name) { it.outputStream().use { out -> from.inputStream().use { it.copyTo(out) } } }
     } else source
-    launchView(context, name, uri ?: return toast(context, "Can't open this file"))
+    // A SAF `content://` URI is the real file, so the other app can save straight back to it.
+    // A cache copy can't, so it stays read-only.
+    launchView(context, name, uri ?: return toast(context, "Can't open this file"), writable = !isCopy)
 }
 
 /** Same, for text that only exists in memory (e.g. a file attached to a chat message). */
@@ -36,12 +39,13 @@ private fun copyToCache(context: Context, name: String, write: (File) -> Unit): 
     FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
 }.getOrNull()
 
-private fun launchView(context: Context, name: String, uri: Uri) {
+private fun launchView(context: Context, name: String, uri: Uri, writable: Boolean = false) {
     val ext = name.substringAfterLast('.', "").lowercase()
     val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
     val intent = Intent(Intent.ACTION_VIEW).apply {
         setDataAndType(uri, mime)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (writable) addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
     }
     val chooser = Intent.createChooser(intent, "Open with").apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
