@@ -40,6 +40,7 @@ import com.edo.app.ui.rememberSwipePanelsState
 import com.edo.app.ui.projects.ProjectsScreen
 import com.edo.app.ui.schedules.SchedulesScreen
 import com.edo.app.ui.settings.SettingsScreen
+import com.edo.app.ui.stats.StatsScreen
 import com.edo.app.ui.share.ShareScreen
 import com.edo.app.ui.theme.EdoTheme
 import com.edo.app.ui.threads.ThreadsScreen
@@ -158,12 +159,19 @@ class MainActivity : ComponentActivity() {
                             SwipePanels(
                                 state = panels,
                                 rightEnabled = hasProject,
-                                left = { ThreadsScreen(container = container, onBack = panels::close) },
+                                left = {
+                                    ThreadsScreen(
+                                        container = container,
+                                        onBack = panels::close,
+                                        onOpenStats = { open("stats") },
+                                        onOpenSettings = { open("settings") },
+                                    )
+                                },
                                 right = { FilesScreen(container = container, onBack = panels::close) },
                             ) {
                                 ChatScreen(
                                     container = container,
-                                    onOpenSettings = { open("settings") },
+                                    onOpenProjectSettings = { id -> open("projects?edit=$id") },
                                     onOpenProjects = { open("projects") },
                                     onOpenProjectsFromBottom = { open("projects?bottom=true") },
                                     onOpenThreads = { panels.open(PanelSide.Left) },
@@ -176,16 +184,30 @@ class MainActivity : ComponentActivity() {
                             SchedulesScreen(container = container, onBack = popBack)
                         }
                         dialog(
-                            "projects?bottom={bottom}",
-                            arguments = listOf(navArgument("bottom") {
-                                type = NavType.BoolType
-                                defaultValue = false
-                            }),
+                            "projects?bottom={bottom}&edit={edit}",
+                            arguments = listOf(
+                                navArgument("bottom") {
+                                    type = NavType.BoolType
+                                    defaultValue = false
+                                },
+                                navArgument("edit") {
+                                    type = NavType.LongType
+                                    defaultValue = -1L
+                                },
+                            ),
                         ) { entry ->
                             ProjectsScreen(
                                 container = container,
                                 atBottom = entry.arguments?.getBoolean("bottom") ?: false,
+                                editProjectId = entry.arguments?.getLong("edit") ?: -1L,
                                 onBack = popBack,
+                            )
+                        }
+                        composable("stats") {
+                            StatsScreen(
+                                container = container,
+                                onBack = popBack,
+                                onOpenChat = { nav.popBackStack("chat", inclusive = false) },
                             )
                         }
                         composable("settings") {

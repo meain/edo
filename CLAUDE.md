@@ -5,19 +5,20 @@ Claude-Code-style agent app for Android. Kotlin + Jetpack Compose, Material 3 wi
 ## Architecture
 
 - `app/src/main/java/com/edo/app/`
-  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`; currently v12), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
+  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`, `ScheduleRunEntity`, `UsageEventEntity`; currently v14), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
   - `llm/` — `AnthropicClient`, `OpenAIClient` (also used for OpenRouter, with `OpenRouterOptions.requestExtras`), `fetchModelIds` for model autocomplete, shared `LlmClient` + streaming `LlmEvent` types
   - `agent/` — `Agent` loop, `ApprovalGate`, tools, `SafWorkspace` / `FileWorkspace` / `InMemoryWorkspace`
   - `schedule/` — `ScheduleManager` (save/run/re-arm), `Recurrence` (next-run maths), `ScheduleReceiver` (alarm + boot/time broadcasts), `ScheduleNotifier`
   - `ui/SwipePanels.kt` — gives the chat screen a left (chats) and right (files) full-width panel that follow the finger
   - `ui/chat/` — `ChatScreen` + `ChatViewModel`; `ChatSession` / `ChatSessions` hold each chat's conversation and agent run on the app scope; `RunNotifier` (finished-run notification), `Speaker` (text-to-speech)
   - `ui/projects/` — project list as a top card (dialog route) + create/edit sheets (SAF folder picker pre-navigated to `/sdcard/Edo`)
-  - `ui/threads/` — chat list (left panel): newest 15 shown, the rest folded; scheduled chats get an alarm icon
+  - `ui/threads/` — left panel: an "Edo" header with Stats and Settings icons (the only way into global settings), a project card (chat count, chats this week, tokens, cost), New chat, then chats grouped Today / Yesterday / This week / Earlier; newest 15 shown, the rest folded; scheduled chats get an alarm icon
+  - `ui/stats/` — Stats page, opened from the left panel header (see "Stats")
   - `ui/files/` — workspace file browser (right panel): Markdown preview, long-press actions, open in another app
   - `ui/schedules/` — per-project schedule list + editor, with Run now
   - `ui/settings/` — provider/key/model with autocomplete, optional weak model for side tasks like chat titles (`AppSettings.forSideTasks`), OpenRouter routing options
   - `ui/OpenExternal.kt` — hands files to other apps via `FileProvider` (copies `file://` and in-memory text into `cacheDir/open/`)
-- `MainActivity.kt` — single activity, edge-to-edge, NavHost with `chat` (hosts the swipe panels), `projects` (dialog), `schedules`, `settings`, `share`
+- `MainActivity.kt` — single activity, edge-to-edge, NavHost with `chat` (hosts the swipe panels), `projects` (dialog; `projects?edit=<id>` shows only that project's settings sheet, used by the chat overflow menu's "Settings"), `schedules`, `settings` (global), `stats`, `share`
 
 Threads are scoped to projects, messages to threads. `AppSettings.activeProjectId`/`activeThreadId` persist the current selection; switching projects clears the active thread.
 
@@ -50,6 +51,14 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 - Both clients emit `LlmEvent.Usage` (Anthropic from `message_start`/`message_delta`; OpenAI-style needs `stream_options.include_usage`, and OpenRouter also `usage.include` for its own `cost`). `ChatSession.recordUsage` adds each turn to the thread (`ThreadEntity.inputTokens/outputTokens/costUsd/costPartial`), shown under the project name in the chat top bar. Chat-title generation is not counted.
 - Cost is the provider-reported figure, else `PriceBook` (LiteLLM `model_prices_and_context_window.json`, cached in `filesDir`, refreshed weekly). A model with no price adds tokens but no cost and sets `costPartial`, shown as `$0.04+`.
 - `ScheduleRunEntity` (`schedule_runs`) gets one row per run, including skipped and failed ones, copying the thread totals; the newest 30 per schedule are kept, while `ScheduleEntity.total*` holds lifetime totals (bumped by `ScheduleDao.addUsage`, preserved by `ScheduleManager.save`) and shows as "All runs" on the row and in the history dialog. The history icon on a schedule row lists them and opens the run's chat.
+
+## Stats
+
+- `StatsScreen` shows all-time / 7-day / 30-day totals (from `ThreadEntity` totals, windowed by a chat's last activity, so deleting a chat removes its usage), spend and messages over time (Day = 14 days, Month = 12, Year = 5; Total / by project / by model, top 5 series plus "Other"), cost by model and project, the five most expensive chats (tap opens the chat), tool-call counts and scheduled-run outcomes.
+- Spend over time and cost by model come from `usage_events` (v13): one row per model response, written in `ChatSession.recordUsage`, with project, model, tokens and cost. It survives deleting chats or projects, but only has data from that version on; older usage appears only in the thread totals.
+- `MessageEntity.model` (v14) records which model wrote an assistant message; user messages and older rows are blank. The by-model messages view counts assistant replies only, and older ones show as "unknown (older)".
+- Tool counts come from regex over assistant `tool_use` JSON in `messages` (`MessageDao.toolCallJson`), so they depend on the `MessageCodec` format.
+- Schedule titles are looked up by id; runs of a deleted schedule show as "Deleted schedule". Chat-title generation is not counted anywhere.
 
 ## Skills
 
@@ -112,4 +121,4 @@ Each project's agent must only reach its own folder. The OS boundary is the per-
 - A file sent with a message is inlined as an `<attached_file>` block (`AttachedFiles.kt`); there is no file on disk, so opening it externally writes the text to the cache first.
 - Anything handed to another app through `FileProvider` must live under a directory declared in `res/xml/file_paths.xml` (`captures/`, `open/`), or `getUriForFile` throws.
 - OpenRouter extras are plain request-body fields (`provider.only/ignore/sort/...`, `models`, `reasoning`) merged over the normal body; the user's raw JSON wins. The field names were written from memory, not checked against OpenRouter's current docs.
-- Room uses explicit migrations (3→4 … 11→12) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.
+- Room uses explicit migrations (3→4 … 13→14) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.

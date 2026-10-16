@@ -23,12 +23,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +55,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.edo.app.AppContainer
 import com.edo.app.data.ThreadEntity
+import com.edo.app.data.UsageTotals
+import com.edo.app.data.formatTokens
+import com.edo.app.data.usage
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -58,7 +65,12 @@ import java.util.Date
 
 /** Chat list; hosted as the left panel of the chat screen's swipe container. */
 @Composable
-fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
+fun ThreadsScreen(
+    container: AppContainer,
+    onBack: () -> Unit,
+    onOpenStats: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
     val activeProjectId by container.activeProjectId.collectAsState()
     val activeThreadId by container.activeThreadId.collectAsState()
@@ -73,6 +85,10 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
         }
     }
     val threads by threadsFlow.collectAsState(initial = emptyList())
+    // Unfiltered, so the project card's numbers don't change with the search box.
+    val projectThreads by remember(activeProjectId) {
+        if (activeProjectId > 0) container.db.threads().observeForProject(activeProjectId) else flowOf(emptyList())
+    }.collectAsState(initial = emptyList())
     var projectName by remember { mutableStateOf("") }
     val activeProjectIdState = activeProjectId
     androidx.compose.runtime.LaunchedEffect(activeProjectIdState) {
@@ -84,29 +100,76 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
     val focusManager = LocalFocusManager.current
 
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+        // App header: name plus app-wide screens. Project things live below it.
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("Chats", style = MaterialTheme.typography.titleMedium)
-                if (projectName.isNotBlank()) {
-                    Text(
-                        projectName,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            Text(
+                "Edo",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onOpenStats) {
+                Icon(Icons.Filled.BarChart, contentDescription = "Stats")
             }
-            TextButton(onClick = {
-                container.setActiveThread(-1L)
-                onBack()
-            }) {
-                Icon(Icons.Filled.Add, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("New")
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Filled.Settings, contentDescription = "Settings")
             }
         }
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+        // Current project: name, chat count, settings.
+        Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        projectName.ifBlank { "No project" },
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (activeProjectId > 0) {
+                        val usage = projectThreads.fold(UsageTotals()) { acc, t -> acc + t.usage() }
+                        val weekAgo = System.currentTimeMillis() - 7 * 86_400_000L
+                        val recent = projectThreads.count { it.lastUpdatedAt >= weekAgo }
+                        Text(
+                            buildString {
+                                append(projectThreads.size).append(if (projectThreads.size == 1) " chat" else " chats")
+                                if (recent != projectThreads.size) append(" · ").append(recent).append(" this week")
+                                if (!usage.isEmpty) {
+                                    append("\n").append(formatTokens(usage.inputTokens + usage.outputTokens)).append(" tokens")
+                                    usage.costLabel()?.let { append(" · ").append(it) }
+                                }
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+            }
+        }
+        FilledTonalButton(
+            onClick = {
+                container.setActiveThread(-1L)
+                onBack()
+            },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        ) {
+            Icon(Icons.Filled.Add, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("New chat")
+        }
+        Spacer(Modifier.height(8.dp))
         if (threads.isEmpty()) {
             Text(
                 if (trimmedQuery.isEmpty()) "No chats yet. Tap New to start one."
@@ -129,16 +192,28 @@ fun ThreadsScreen(container: AppContainer, onBack: () -> Unit) {
                     if (trimmedQuery.isEmpty()) threads.take(MAX_VISIBLE_CHATS) to threads.drop(MAX_VISIBLE_CHATS)
                     else threads to emptyList()
                 val visible = if (showOlder) recent + older else recent
-                items(visible, key = { it.id }) { thread ->
-                    ThreadRow(
-                        thread = thread,
-                        isActive = thread.id == activeThreadId,
-                        onSelect = {
-                            container.setActiveThread(thread.id)
-                            onBack()
-                        },
-                        onDelete = { confirmDelete = thread },
-                    )
+                // Reversed layout: a group's label goes after its rows so it lands above them.
+                val groups = visible.groupBy { dayBucket(it.lastUpdatedAt) }
+                for ((label, group) in groups) {
+                    items(group, key = { it.id }) { thread ->
+                        ThreadRow(
+                            thread = thread,
+                            isActive = thread.id == activeThreadId,
+                            onSelect = {
+                                container.setActiveThread(thread.id)
+                                onBack()
+                            },
+                            onDelete = { confirmDelete = thread },
+                        )
+                    }
+                    item(key = "group-$label") {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 6.dp),
+                        )
+                    }
                 }
                 // Reversed layout: the last item sits at the top, above the oldest chats.
                 if (older.isNotEmpty()) {
@@ -262,6 +337,21 @@ private fun ThreadRow(
 }
 
 private const val MAX_VISIBLE_CHATS = 15
+
+/** Group label for the chat list: Today, Yesterday, This week, or Earlier. */
+private fun dayBucket(ts: Long): String {
+    val cal = java.util.Calendar.getInstance().apply {
+        set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val today = cal.timeInMillis
+    return when {
+        ts >= today -> "Today"
+        ts >= today - 86_400_000L -> "Yesterday"
+        ts >= today - 6 * 86_400_000L -> "This week"
+        else -> "Earlier"
+    }
+}
 
 /** Escapes LIKE wildcards so the query matches literally (pairs with `ESCAPE '\'`). */
 private fun escapeLike(s: String): String =

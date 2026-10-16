@@ -199,7 +199,7 @@ private suspend fun androidx.compose.foundation.lazy.LazyListState.followBottom(
 @Composable
 fun ChatScreen(
     container: AppContainer,
-    onOpenSettings: () -> Unit,
+    onOpenProjectSettings: (Long) -> Unit,
     onOpenProjects: () -> Unit,
     onOpenProjectsFromBottom: () -> Unit,
     onOpenThreads: () -> Unit,
@@ -487,13 +487,11 @@ fun ChatScreen(
                         ) {
                             Icon(Icons.Filled.Edit, contentDescription = "New chat")
                         }
-                    }
-                    var menuOpen by remember { mutableStateOf(false) }
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        if (state.currentProject != null) {
+                        var menuOpen by remember { mutableStateOf(false) }
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
                                 text = { Text("Files") },
                                 leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null) },
@@ -504,17 +502,12 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Filled.Schedule, contentDescription = null) },
                                 onClick = { menuOpen = false; onOpenSchedules() },
                             )
+                            DropdownMenuItem(
+                                text = { Text("Settings") },
+                                leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                                onClick = { menuOpen = false; onOpenProjectSettings(state.currentProject!!.id) },
+                            )
                         }
-                        DropdownMenuItem(
-                            text = { Text("Projects") },
-                            leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null) },
-                            onClick = { menuOpen = false; onOpenProjects() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Settings") },
-                            leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                            onClick = { menuOpen = false; onOpenSettings() },
-                        )
                     }
                 },
             )

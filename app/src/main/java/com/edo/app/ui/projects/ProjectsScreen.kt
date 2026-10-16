@@ -80,7 +80,14 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProjectsScreen(container: AppContainer, atBottom: Boolean = false, onBack: () -> Unit) {
+fun ProjectsScreen(
+    container: AppContainer,
+    atBottom: Boolean = false,
+    // > 0 opens just that project's settings sheet, without the project list.
+    editProjectId: Long = -1L,
+    onBack: () -> Unit,
+) {
+    val directEdit = editProjectId > 0
     val scope = rememberCoroutineScope()
     val projects by container.db.projects().observeAll().collectAsState(initial = emptyList())
     val activeId by container.activeProjectId.collectAsState()
@@ -88,10 +95,12 @@ fun ProjectsScreen(container: AppContainer, atBottom: Boolean = false, onBack: (
     // survive that or the sheet vanishes (with its typed input) when the picker returns.
     var showCreate by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<ProjectEntity?>(null) }
-    var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var editingId by rememberSaveable { mutableStateOf<Long?>(if (directEdit) editProjectId else null) }
     val editing = projects.firstOrNull { it.id == editingId }
+    val closeEdit = { editingId = null; if (directEdit) onBack() }
+    val closeDelete = { confirmDelete = null; if (directEdit) onBack() }
 
-    Dialog(
+    if (!directEdit) Dialog(
         onDismissRequest = onBack,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
@@ -159,7 +168,6 @@ fun ProjectsScreen(container: AppContainer, atBottom: Boolean = false, onBack: (
                                             onBack()
                                         },
                                         onEdit = { editingId = project.id },
-                                        onDelete = { confirmDelete = project },
                                     )
                                 }
                             }
@@ -172,7 +180,7 @@ fun ProjectsScreen(container: AppContainer, atBottom: Boolean = false, onBack: (
 
     confirmDelete?.let { project ->
         AlertDialog(
-            onDismissRequest = { confirmDelete = null },
+            onDismissRequest = closeDelete,
             title = { Text("Delete project?") },
             text = { Text("\"${project.name}\" and all its chat history will be deleted permanently.") },
             confirmButton = {
@@ -186,7 +194,7 @@ fun ProjectsScreen(container: AppContainer, atBottom: Boolean = false, onBack: (
                             container.releaseGrant(project.workspaceUri)
                             if (activeId == project.id) container.setActiveProject(-1L)
                         }
-                        confirmDelete = null
+                        closeDelete()
                     },
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
@@ -195,7 +203,7 @@ fun ProjectsScreen(container: AppContainer, atBottom: Boolean = false, onBack: (
                 ) { Text("Delete") }
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = null }) { Text("Cancel") }
+                TextButton(onClick = closeDelete) { Text("Cancel") }
             },
         )
     }
@@ -221,13 +229,13 @@ fun ProjectsScreen(container: AppContainer, atBottom: Boolean = false, onBack: (
     editing?.let { proj ->
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
-            onDismissRequest = { editingId = null },
+            onDismissRequest = closeEdit,
             sheetState = sheetState,
         ) {
             EditProjectSheet(
                 container = container,
                 project = proj,
-                onDone = { editingId = null },
+                onDone = closeEdit,
                 onDeleteRequest = {
                     editingId = null
                     confirmDelete = proj
@@ -243,7 +251,6 @@ private fun ProjectRow(
     isActive: Boolean,
     onSelect: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit,
 ) {
     val bg = if (isActive) MaterialTheme.colorScheme.secondaryContainer
     else MaterialTheme.colorScheme.surface
@@ -306,14 +313,6 @@ private fun ProjectRow(
                 Icon(
                     Icons.Filled.Settings,
                     contentDescription = "Edit project",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    Icons.Filled.Delete,
-                    contentDescription = "Delete",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )

@@ -28,6 +28,7 @@ import com.edo.app.agent.WriteFileTool
 import com.edo.app.agent.buildSystemPrompt
 import com.edo.app.data.AppSettings
 import com.edo.app.data.ProjectEntity
+import com.edo.app.data.UsageEventEntity
 import com.edo.app.data.Provider
 import com.edo.app.data.ThreadEntity
 import com.edo.app.data.forSideTasks
@@ -481,6 +482,13 @@ class ChatSession internal constructor(
         val cost = u.costUsd ?: container.priceBook.price(runProvider, runModel)?.cost(u)
         val input = u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens
         container.db.threads().addUsage(threadId, input, u.outputTokens, cost ?: 0.0, cost == null)
+        container.db.usageEvents().insert(
+            UsageEventEntity(
+                projectId = projectId, threadId = threadId, model = runModel,
+                inputTokens = input, outputTokens = u.outputTokens, cacheReadTokens = u.cacheReadTokens,
+                costUsd = cost ?: 0.0, costPartial = cost == null,
+            )
+        )
         val thread = container.db.threads().getById(threadId)
         _state.update { it.copy(currentThread = thread) }
     }
@@ -489,7 +497,10 @@ class ChatSession internal constructor(
         val newItems = conversation.drop(persistedCount)
         var uiMsgs = _state.value.messages
         for (msg in newItems) {
-            val rowId = container.db.messages().insert(uiToRow(msg, threadId))
+            val row = uiToRow(msg, threadId)
+            val rowId = container.db.messages().insert(
+                if (msg.role == Role.Assistant) row.copy(model = runModel) else row
+            )
             uiMsgs = uiMsgs + UiMessage(rowId, msg.role, msg.blocks)
         }
         persistedCount = conversation.size

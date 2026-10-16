@@ -76,6 +76,9 @@ interface ThreadDao {
     @Query("SELECT * FROM threads WHERE project_id = :projectId ORDER BY last_updated_at DESC")
     fun observeForProject(projectId: Long): Flow<List<ThreadEntity>>
 
+    @Query("SELECT * FROM threads")
+    fun observeAll(): Flow<List<ThreadEntity>>
+
     /** Chats whose title or any message contains [query] (case-insensitive for ASCII). */
     @Query(
         """
@@ -125,10 +128,26 @@ data class MessageEntity(
     @ColumnInfo(name = "role") val role: String,
     @ColumnInfo(name = "content_json") val contentJson: String,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+    /** Model that wrote an assistant message; blank for user messages and for rows from before v14. */
+    @ColumnInfo(name = "model", defaultValue = "") val model: String = "",
+)
+
+/** A message's time, project and model: all the stats charts need from it. */
+data class MessageStamp(
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "project_id") val projectId: Long,
+    @ColumnInfo(name = "role") val role: String,
+    @ColumnInfo(name = "model") val model: String,
 )
 
 @Dao
 interface MessageDao {
+    @Query(
+        "SELECT m.created_at, t.project_id, m.role, m.model FROM messages m " +
+            "JOIN threads t ON t.id = m.thread_id"
+    )
+    suspend fun stamps(): List<MessageStamp>
+
     @Query("SELECT * FROM messages WHERE thread_id = :threadId ORDER BY id ASC")
     suspend fun listForThread(threadId: Long): List<MessageEntity>
 
@@ -137,6 +156,17 @@ interface MessageDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(msg: MessageEntity): Long
+
+    /** Message timestamps since [since], for the stats page's activity chart. */
+    @Query("SELECT created_at FROM messages WHERE created_at >= :since")
+    suspend fun timestampsSince(since: Long): List<Long>
+
+    @Query("SELECT COUNT(*) FROM messages")
+    suspend fun countAll(): Int
+
+    /** Assistant messages that called tools; the stats page counts the tool names in them. */
+    @Query("SELECT content_json FROM messages WHERE role = 'Assistant' AND content_json LIKE '%\"tool_use\"%'")
+    suspend fun toolCallJson(): List<String>
 
     @Query("DELETE FROM messages WHERE thread_id = :threadId")
     suspend fun clearThread(threadId: Long)
@@ -232,8 +262,35 @@ data class ScheduleRunEntity(
     @ColumnInfo(name = "cost_partial") val costPartial: Boolean = false,
 )
 
+/** One model response's usage. Unlike the per-chat totals these survive deleting the chat. */
+@Entity(tableName = "usage_events", indices = [Index("created_at")])
+data class UsageEventEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "project_id") val projectId: Long,
+    @ColumnInfo(name = "thread_id") val threadId: Long,
+    @ColumnInfo(name = "model") val model: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(name = "input_tokens") val inputTokens: Long,
+    @ColumnInfo(name = "output_tokens") val outputTokens: Long,
+    @ColumnInfo(name = "cache_read_tokens", defaultValue = "0") val cacheReadTokens: Long = 0,
+    @ColumnInfo(name = "cost_usd") val costUsd: Double,
+    @ColumnInfo(name = "cost_partial") val costPartial: Boolean,
+)
+
+@Dao
+interface UsageEventDao {
+    @Insert
+    suspend fun insert(e: UsageEventEntity)
+
+    @Query("SELECT * FROM usage_events")
+    fun observeAll(): Flow<List<UsageEventEntity>>
+}
+
 @Dao
 interface ScheduleRunDao {
+    @Query("SELECT * FROM schedule_runs")
+    fun observeAll(): Flow<List<ScheduleRunEntity>>
+
     @Query("SELECT * FROM schedule_runs WHERE schedule_id = :scheduleId ORDER BY started_at DESC")
     fun observeForSchedule(scheduleId: Long): Flow<List<ScheduleRunEntity>>
 
@@ -260,9 +317,9 @@ interface ScheduleRunDao {
 @Database(
     entities = [
         ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class,
-        ScheduleRunEntity::class,
+        ScheduleRunEntity::class, UsageEventEntity::class,
     ],
-    version = 12,
+    version = 14,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -271,6 +328,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun messages(): MessageDao
     abstract fun schedules(): ScheduleDao
     abstract fun scheduleRuns(): ScheduleRunDao
+    abstract fun usageEvents(): UsageEventDao
 
     companion object {
         @Volatile private var instance: ChatDatabase? = null
@@ -409,13 +467,35 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v12 → v13: per-response usage log (model, tokens, cost) for the stats page. */
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS usage_events (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "project_id INTEGER NOT NULL, thread_id INTEGER NOT NULL, model TEXT NOT NULL, " +
+                        "created_at INTEGER NOT NULL, input_tokens INTEGER NOT NULL, " +
+                        "output_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL DEFAULT 0, " +
+                        "cost_usd REAL NOT NULL, cost_partial INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_usage_events_created_at ON usage_events (created_at)")
+            }
+        }
+
+        /** v13 → v14: record which model wrote each assistant message, for the stats breakdown. */
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN model TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }
