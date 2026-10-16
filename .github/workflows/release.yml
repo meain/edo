@@ -36,19 +36,21 @@ jobs:
           TAG=${{ github.ref_name }}
           UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
           OUTPUT=app/build/outputs/apk/release/edo-${TAG}.apk
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/release.jks
-            APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name "apksigner" -type f | sort -V | tail -1)
-            "$APKSIGNER" sign \
-              --ks /tmp/release.jks \
-              --ks-pass "pass:$KEYSTORE_PASSWORD" \
-              --ks-key-alias "$KEY_ALIAS" \
-              --key-pass "pass:$KEY_PASSWORD" \
-              --out "$OUTPUT" \
-              "$UNSIGNED"
-          else
-            cp "$UNSIGNED" "$OUTPUT"
+          # An unsigned APK can't be installed, so never publish one.
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::KEYSTORE_BASE64 secret is not set; refusing to publish an unsigned APK"
+            exit 1
           fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/release.jks
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name "apksigner" -type f | sort -V | tail -1)
+          "$APKSIGNER" sign \
+            --ks /tmp/release.jks \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --out "$OUTPUT" \
+            "$UNSIGNED"
+          "$APKSIGNER" verify "$OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
