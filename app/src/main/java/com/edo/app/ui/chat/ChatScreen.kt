@@ -622,7 +622,6 @@ fun ChatScreen(
                             item("error") {
                                 ErrorBanner(
                                     message = err,
-                                    onDismiss = { vm.dismissError() },
                                     onRetry = if (state.canRetry) { { vm.retryAgent() } } else null,
                                 )
                             }
@@ -1538,7 +1537,7 @@ private fun RetryingBanner(attempt: Int, maxAttempts: Int, cause: String? = null
 }
 
 @Composable
-private fun ErrorBanner(message: String, onDismiss: () -> Unit, onRetry: (() -> Unit)? = null) {
+private fun ErrorBanner(message: String, onRetry: (() -> Unit)? = null) {
     var expanded by remember { mutableStateOf(false) }
     val isLong = message.length > 120
     Surface(
@@ -1565,26 +1564,23 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit, onRetry: (() -> 
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                 )
-                if (isLong) {
-                    IconButton(
-                        onClick = { expanded = !expanded },
-                        modifier = Modifier.size(24.dp),
-                    ) {
-                        Icon(
-                            if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                            contentDescription = "Show full error",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onErrorContainer,
-                        )
+            }
+            if (isLong || onRetry != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (isLong) {
+                        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.height(28.dp)) {
+                            Text(if (expanded) "Show less" else "Show more", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
-                }
-                if (onRetry != null) {
-                    TextButton(onClick = onRetry, modifier = Modifier.height(28.dp)) {
-                        Text("Retry", style = MaterialTheme.typography.labelSmall)
+                    if (onRetry != null) {
+                        TextButton(onClick = onRetry, modifier = Modifier.height(28.dp)) {
+                            Text("Retry", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
-                }
-                TextButton(onClick = onDismiss, modifier = Modifier.height(28.dp)) {
-                    Text("×", style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
