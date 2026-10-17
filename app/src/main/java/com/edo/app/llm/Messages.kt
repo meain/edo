@@ -35,6 +35,36 @@ data class ConvMessage(
     val blocks: List<Block>,
 )
 
+/**
+ * Give every assistant tool_use a matching tool_result in the very next message, which the APIs
+ * require. A run cancelled mid-tool and followed by a plain user message leaves such a gap in the
+ * middle of history, where reload's trailing-only strip can't reach it.
+ */
+fun withToolResultsRepaired(messages: List<ConvMessage>): List<ConvMessage> {
+    val out = ArrayList<ConvMessage>(messages.size)
+    for ((i, m) in messages.withIndex()) {
+        out.add(m)
+        if (m.role != Role.Assistant) continue
+        val uses = m.blocks.filterIsInstance<Block.ToolUse>()
+        if (uses.isEmpty()) continue
+        val next = messages.getOrNull(i + 1)
+        val answered = next?.takeIf { it.role == Role.User }
+            ?.blocks?.filterIsInstance<Block.ToolResult>()?.map { it.toolUseId }?.toSet().orEmpty()
+        val missing = uses.filter { it.id !in answered }.map {
+            Block.ToolResult(it.id, "Interrupted before this finished; it may not have completed.", true)
+        }
+        if (missing.isEmpty()) continue
+        if (next != null && next.role == Role.User && answered.isNotEmpty()) {
+            // Partially answered: top up the existing results message below.
+            out.add(ConvMessage(Role.User, next.blocks + missing))
+            // Skip the original next message by marking it consumed.
+            return out + withToolResultsRepaired(messages.drop(i + 2))
+        }
+        out.add(ConvMessage(Role.User, missing))
+    }
+    return out
+}
+
 data class ToolSpec(
     val name: String,
     val description: String,

@@ -6,6 +6,7 @@ import com.edo.app.llm.LlmClient
 import com.edo.app.llm.LlmEvent
 import com.edo.app.llm.TokenUsage
 import com.edo.app.llm.Role
+import com.edo.app.llm.withToolResultsRepaired
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -81,7 +82,7 @@ class Agent(
                 }
                 failed = false
 
-                llm.stream(systemPrompt, conversation.toList(), tools.specs).collect { ev ->
+                llm.stream(systemPrompt, withToolResultsRepaired(conversation), tools.specs).collect { ev ->
                     when (ev) {
                         is LlmEvent.TextDelta -> {
                             assistantText.append(ev.text)
