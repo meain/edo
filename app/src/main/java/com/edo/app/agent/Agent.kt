@@ -178,7 +178,7 @@ class Agent(
             conversation.add(ConvMessage(Role.User, resultBlocks))
             // loop continues — model sees tool results
         }
-        emit(AgentEvent.Failure("max turns ($maxTurns) reached"))
+        emit(AgentEvent.Failure("$MAX_TURNS_PREFIX ($maxTurns) reached"))
         emit(AgentEvent.Finished)
     }
 
@@ -193,6 +193,7 @@ class Agent(
             Agent::class.java.getResource("system_prompt.md")!!.readText().trim()
         }
         const val MAX_LLM_RETRIES = 5
+        const val MAX_TURNS_PREFIX = "max turns"
     }
 }
 

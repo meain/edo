@@ -623,6 +623,7 @@ fun ChatScreen(
                                 ErrorBanner(
                                     message = err,
                                     onRetry = if (state.canRetry) { { vm.retryAgent() } } else null,
+                                    retryLabel = if (err.startsWith(com.edo.app.agent.Agent.MAX_TURNS_PREFIX)) "Continue" else "Retry",
                                 )
                             }
                         }
@@ -1537,7 +1538,7 @@ private fun RetryingBanner(attempt: Int, maxAttempts: Int, cause: String? = null
 }
 
 @Composable
-private fun ErrorBanner(message: String, onRetry: (() -> Unit)? = null) {
+private fun ErrorBanner(message: String, onRetry: (() -> Unit)? = null, retryLabel: String = "Retry") {
     var expanded by remember { mutableStateOf(false) }
     val isLong = message.length > 120
     Surface(
@@ -1578,7 +1579,7 @@ private fun ErrorBanner(message: String, onRetry: (() -> Unit)? = null) {
                     }
                     if (onRetry != null) {
                         TextButton(onClick = onRetry, modifier = Modifier.height(28.dp)) {
-                            Text("Retry", style = MaterialTheme.typography.labelSmall)
+                            Text(retryLabel, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
