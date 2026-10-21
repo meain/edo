@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,6 +98,8 @@ fun ThreadsScreen(
         else "Chats"
     }
     var confirmDelete by remember { mutableStateOf<ThreadEntity?>(null) }
+    var pickingProject by remember { mutableStateOf(false) }
+    val allProjects by container.db.projects().observeAll().collectAsState(initial = emptyList())
     val focusManager = LocalFocusManager.current
 
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
@@ -124,7 +127,9 @@ fun ThreadsScreen(
         Surface(
             color = MaterialTheme.colorScheme.secondaryContainer,
             shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp)
+                .clip(MaterialTheme.shapes.large)
+                .clickable { pickingProject = true },
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -251,6 +256,33 @@ fun ThreadsScreen(
             shape = MaterialTheme.shapes.large,
             textStyle = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.fillMaxWidth().imePadding().padding(horizontal = 8.dp, vertical = 6.dp),
+        )
+    }
+
+    if (pickingProject) {
+        AlertDialog(
+            onDismissRequest = { pickingProject = false },
+            title = { Text("Switch project") },
+            text = {
+                LazyColumn {
+                    items(allProjects) { p ->
+                        Text(
+                            p.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = if (p.id == activeProjectId) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable {
+                                    pickingProject = false
+                                    if (p.id != activeProjectId) container.setActiveProject(p.id)
+                                }
+                                .padding(vertical = 12.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { pickingProject = false }) { Text("Close") } },
         )
     }
 
