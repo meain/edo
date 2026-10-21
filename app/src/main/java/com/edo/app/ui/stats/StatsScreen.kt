@@ -18,7 +18,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.TextButton
+import com.edo.app.data.ScheduleEntity
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -62,7 +66,7 @@ private val TOOL_NAME = Regex("\"kind\":\"tool_use\",\"id\":\"[^\"]*\",\"name\":
 /** Tokens, cost, chats, messages, tools and schedule runs across every project. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatsScreen(container: AppContainer, onBack: () -> Unit, onOpenChat: () -> Unit) {
+fun StatsScreen(container: AppContainer, onBack: () -> Unit, onOpenChat: () -> Unit, onOpenSchedules: () -> Unit) {
     val threads by container.db.threads().observeAll().collectAsState(initial = emptyList())
     val projects by container.db.projects().observeAll().collectAsState(initial = emptyList())
     val events by container.db.usageEvents().observeAll().collectAsState(initial = emptyList())
@@ -83,39 +87,53 @@ fun StatsScreen(container: AppContainer, onBack: () -> Unit, onOpenChat: () -> U
     }
 
     // Schedule runs only know the schedule id; look the titles up for display.
-    var scheduleTitles by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
+    var schedules by remember { mutableStateOf<Map<Long, ScheduleEntity>>(emptyMap()) }
     LaunchedEffect(runs.size) {
-        scheduleTitles = withContext(Dispatchers.IO) {
-            container.db.schedules().listAll().associate { it.id to it.title }
+        schedules = withContext(Dispatchers.IO) {
+            container.db.schedules().listAll().associateBy { it.id }
         }
     }
     var period by remember { mutableStateOf(Period.Day) }
     val now = System.currentTimeMillis()
-    var groupBy by remember { mutableStateOf(GroupBy.Total) }
+    var groupBy by remember { mutableStateOf(GroupBy.Project) }
+    var metric by remember { mutableStateOf(Metric.Spend) }
+    var showAll by remember { mutableStateOf<Pair<String, List<Pair<String, UsageTotals>>>?>(null) }
     val projectNames = remember(projects) { projects.associate { it.id to it.name } }
     fun projectName(id: Long) = projectNames[id] ?: "Deleted project"
-    val costChart = remember(events, period, groupBy, projectNames) {
-        stack(period, now, groupBy, events.map {
-            Sample(it.createdAt, it.costUsd, when (groupBy) {
-                GroupBy.Project -> projectName(it.projectId)
-                GroupBy.Provider -> it.provider.ifBlank { "unknown (older)" }
-                else -> it.model.ifBlank { "unknown" }
-            })
-        })
-    }
-    val messageChart = remember(messageStats.stamps, period, groupBy, projectNames) {
-        // Only assistant messages carry a model, so the model view counts replies alone.
-        val source = if (groupBy == GroupBy.Model || groupBy == GroupBy.Provider) messageStats.stamps.filter { it.role == "Assistant" } else messageStats.stamps
-        stack(period, now, groupBy, source.map {
-            Sample(it.createdAt, 1.0, when (groupBy) {
-                GroupBy.Project -> projectName(it.projectId)
-                GroupBy.Provider -> it.provider.ifBlank { "unknown (older)" }
-                else -> it.model.ifBlank { "unknown (older)" }
-            })
+    // Rows from before model/provider logging have blank values; they are left out of those views.
+    val chart = remember(metric, events, messageStats.stamps, period, groupBy, projectNames) {
+        val samples = when (metric) {
+            Metric.Spend -> events.map { Triple(it.createdAt, it.costUsd, Triple(it.projectId, it.provider, it.model)) }
+            // Only assistant messages carry a model, so the model and provider views count replies alone.
+            Metric.Messages -> messageStats.stamps
+                .filter { groupBy == GroupBy.Project || it.role == "Assistant" }
+                .map { Triple(it.createdAt, 1.0, Triple(it.projectId, it.provider, it.model)) }
+        }
+        stack(period, now, samples.mapNotNull { (ts, value, key) ->
+            val (projectId, provider, model) = key
+            val series = when (groupBy) {
+                GroupBy.Project -> projectName(projectId)
+                GroupBy.Provider -> provider
+                GroupBy.Model -> model
+            }
+            if (series.isBlank()) null else Sample(ts, value, series)
         })
     }
 
     val stats = remember(threads, projects, events, runs) { compute(threads, projects, events, runs) }
+
+    showAll?.let { (title, rows) ->
+        AlertDialog(
+            onDismissRequest = { showAll = null },
+            title = { Text(title) },
+            text = {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(rows) { (name, u) -> UsageRow(name, u.label(), u) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAll = null }) { Text("Close") } },
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -149,49 +167,46 @@ fun StatsScreen(container: AppContainer, onBack: () -> Unit, onOpenChat: () -> U
             }
 
             item {
-                Section("Spend over time", "Cost per ${period.unit}, newest on the right") {
-                    ChartControls(period, { period = it }, groupBy) { groupBy = it }
+                val spend = metric == Metric.Spend
+                Section(
+                    if (spend) "Spend over time" else "Messages over time",
+                    (if (spend) "Cost" else "Messages") + " per ${period.unit}, newest on the right. Tap a bar for details.",
+                ) {
+                    ChartControls(metric, { metric = it }, period, { period = it }, groupBy) { groupBy = it }
                     StackedChart(
-                        costChart, period, now,
-                        emptyText = "Fills in as you chat; usage is logged per response.",
-                        label = { formatCost(it) },
+                        chart, period, now,
+                        emptyText = if (spend) "Fills in as you chat; usage is logged per response." else "No messages in this range.",
+                        label = { if (spend) formatCost(it) else it.toLong().toString() },
                     )
-                }
-            }
-            item {
-                Section("Messages over time", "Messages per ${period.unit}, newest on the right") {
-                    ChartControls(period, { period = it }, groupBy) { groupBy = it }
-                    StackedChart(
-                        messageChart, period, now,
-                        emptyText = "No messages in this range.",
-                        label = { it.toLong().toString() },
-                    )
-                    if (groupBy == GroupBy.Model || groupBy == GroupBy.Provider) Note("Model and provider views count assistant replies; older replies show as unknown.")
+                    if (!spend && groupBy != GroupBy.Project) Note("Model and provider views count assistant replies; older replies are left out.")
                 }
             }
             if (stats.perModel.isNotEmpty()) {
                 item {
                     Section("Cost by model", "Per-response log, so only usage since model logging started") {
-                        stats.perModel.forEach { (key, u) ->
-                            val (provider, model) = key
-                            UsageRow(model.ifBlank { "unknown" }, listOfNotNull(provider.ifBlank { null }, u.label()).joinToString(" · "), u)
-                        }
+                        TopRows(
+                            "Cost by model",
+                            stats.perModel.map { (key, u) -> key.second to u },
+                            onShowAll = { showAll = it },
+                        )
                     }
                 }
             }
             if (stats.perProvider.isNotEmpty()) {
                 item {
                     Section("Cost by provider", "Per-response log; older usage has no provider") {
-                        stats.perProvider.forEach { (provider, u) -> UsageRow(provider.ifBlank { "unknown (older)" }, u.label(), u) }
+                        TopRows("Cost by provider", stats.perProvider, onShowAll = { showAll = it })
                     }
                 }
             }
             if (stats.perProject.isNotEmpty()) {
                 item {
                     Section("Cost by project", "Every chat in each project") {
-                        stats.perProject.forEach { (name, chats, u) ->
-                            UsageRow(name, "$chats chat${if (chats == 1) "" else "s"} · ${formatTokens(u.inputTokens + u.outputTokens)} tokens", u)
-                        }
+                        TopRows(
+                            "Cost by project",
+                            stats.perProject.map { (name, chats, u) -> name to u },
+                            onShowAll = { showAll = it },
+                        )
                     }
                 }
             }
@@ -239,7 +254,19 @@ fun StatsScreen(container: AppContainer, onBack: () -> Unit, onOpenChat: () -> U
                         )
                         if (stats.avgRunSeconds > 0) Note("Average run ${stats.avgRunSeconds}s")
                         stats.perSchedule.forEach { (id, n, u) ->
-                            UsageRow(scheduleTitles[id] ?: "Deleted schedule", "$n run${if (n == 1) "" else "s"}", u)
+                            val schedule = schedules[id]
+                            UsageRow(
+                                schedule?.title ?: "Deleted schedule",
+                                "$n run${if (n == 1) "" else "s"}",
+                                u,
+                                onClick = schedule?.let { s ->
+                                    {
+                                        // The schedules screen follows the active project.
+                                        container.setActiveProject(s.projectId)
+                                        onOpenSchedules()
+                                    }
+                                },
+                            )
                         }
                     }
                 }
@@ -297,9 +324,10 @@ private fun compute(
     fun total(list: List<UsageEventEntity>) = list.fold(UsageTotals()) { acc, e ->
         acc + UsageTotals(e.inputTokens, e.outputTokens, e.costUsd, e.costPartial)
     }
-    val perModel = events.groupBy { it.provider to it.model }.map { (k, list) -> k to total(list) }
+    // Events from before model/provider logging have blank values; skip them.
+    val perModel = events.filter { it.model.isNotBlank() }.groupBy { it.provider to it.model }.map { (k, list) -> k to total(list) }
         .sortedByDescending { it.second.costUsd }
-    val perProvider = events.groupBy { it.provider }.map { (p, list) -> p to total(list) }
+    val perProvider = events.filter { it.provider.isNotBlank() }.groupBy { it.provider }.map { (p, list) -> p to total(list) }
         .sortedByDescending { it.second.costUsd }
 
     val perSchedule = runs.groupBy { it.scheduleId }.map { (id, list) ->
@@ -358,8 +386,19 @@ private fun UsageRow(name: String, detail: String, usage: UsageTotals, onClick: 
     }
 }
 
+/** Top three rows, with a button for the full list in a dialog. */
+@Composable
+private fun TopRows(title: String, rows: List<Pair<String, UsageTotals>>, onShowAll: (Pair<String, List<Pair<String, UsageTotals>>>) -> Unit) {
+    rows.take(3).forEach { (name, u) -> UsageRow(name, u.label(), u) }
+    if (rows.size > 3) {
+        TextButton(onClick = { onShowAll(title to rows) }) { Text("Show all ${rows.size}") }
+    }
+}
+
 /** What a chart's bars are split by. */
-private enum class GroupBy(val title: String) { Total("Total"), Project("Project"), Model("Model"), Provider("Provider") }
+private enum class GroupBy(val title: String) { Project("Project"), Model("Model"), Provider("Provider") }
+
+private enum class Metric(val title: String) { Spend("Spend"), Messages("Messages") }
 
 private class Sample(val ts: Long, val value: Double, val series: String)
 
@@ -368,12 +407,11 @@ private class Stacked(val series: List<String>, val bars: List<DoubleArray>)
 
 private const val MAX_SERIES = 5
 
-private fun stack(period: Period, now: Long, groupBy: GroupBy, samples: List<Sample>): Stacked {
+private fun stack(period: Period, now: Long, samples: List<Sample>): Stacked {
     val totals = HashMap<String, DoubleArray>()
     for (s in samples) {
         val slot = period.slot(s.ts, now) ?: continue
-        val key = if (groupBy == GroupBy.Total) "All" else s.series
-        totals.getOrPut(key) { DoubleArray(period.count) }[slot] += s.value
+        totals.getOrPut(s.series) { DoubleArray(period.count) }[slot] += s.value
     }
     val ranked = totals.entries.sortedByDescending { it.value.sum() }
     val top = ranked.take(MAX_SERIES)
@@ -414,8 +452,13 @@ private fun StackedChart(
         ) { Note(emptyText) }
         return
     }
+    var selected by remember(data) { mutableStateOf<Int?>(null) }
+    val pick = selected
     Text(
-        "peak ${label(max)}",
+        if (pick == null) "peak ${label(max)}"
+        else period.label(pick, now) + ": " + label(sums[pick]) +
+            data.series.indices.filter { data.bars[pick][it] > 0 }
+                .joinToString("") { " · ${data.series[it]} ${label(data.bars[pick][it])}" },
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -426,7 +469,10 @@ private fun StackedChart(
     ) {
         data.bars.forEachIndexed { i, parts ->
             val total = sums[i]
-            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.Bottom) {
+            Column(
+                Modifier.weight(1f).fillMaxHeight().clickable { selected = if (selected == i) null else i },
+                verticalArrangement = Arrangement.Bottom,
+            ) {
                 if (total <= 0) {
                     Box(Modifier.fillMaxWidth().height(2.dp).background(MaterialTheme.colorScheme.surfaceVariant))
                 } else {
@@ -451,7 +497,7 @@ private fun StackedChart(
         Note(period.label(0, now))
         Note(period.label(period.count - 1, now))
     }
-    if (data.series.size > 1 || (data.series.firstOrNull() ?: "All") != "All") {
+    run {
         data.series.forEachIndexed { j, name ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).background(colors[j % colors.size], MaterialTheme.shapes.extraSmall))
@@ -465,7 +511,20 @@ private fun StackedChart(
 }
 
 @Composable
-private fun ChartControls(period: Period, onPeriod: (Period) -> Unit, groupBy: GroupBy, onGroupBy: (GroupBy) -> Unit) {
+private fun ChartControls(
+    metric: Metric, onMetric: (Metric) -> Unit,
+    period: Period, onPeriod: (Period) -> Unit,
+    groupBy: GroupBy, onGroupBy: (GroupBy) -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        Metric.entries.forEachIndexed { i, m ->
+            SegmentedButton(
+                selected = m == metric,
+                onClick = { onMetric(m) },
+                shape = SegmentedButtonDefaults.itemShape(i, Metric.entries.size),
+            ) { Text(m.title) }
+        }
+    }
     PeriodPicker(period, onPeriod)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         GroupBy.entries.forEach { g ->

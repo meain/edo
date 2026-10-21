@@ -208,6 +208,7 @@ class MainActivity : ComponentActivity() {
                                 container = container,
                                 onBack = popBack,
                                 onOpenChat = { nav.popBackStack("chat", inclusive = false) },
+                                onOpenSchedules = { open("schedules") },
                             )
                         }
                         composable("settings") {
