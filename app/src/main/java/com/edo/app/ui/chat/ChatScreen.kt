@@ -195,7 +195,7 @@ private suspend fun androidx.compose.foundation.lazy.LazyListState.followBottom(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
     container: AppContainer,
@@ -815,21 +815,49 @@ fun ChatScreen(
                             append(input.trim())
                         }
                         if (state.running && hasContent) {
-                            // Queue button: agent is running but user has typed a message
-                            IconButton(
-                                onClick = {
-                                    vm.queueMessage(composed.trim(), pendingImages)
-                                    setInput("")
-                                    pendingImages = emptyList()
-                                    pendingTextFiles = emptyList()
-                                },
-                                modifier = Modifier.padding(bottom = 2.dp),
+                            // Agent is running and a message is typed: tap interrupts and sends it now,
+                            // long-press offers to send it once the turn ends instead.
+                            var sendMenu by remember { mutableStateOf(false) }
+                            val haptics = LocalHapticFeedback.current
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .padding(start = 4.dp, end = 8.dp, bottom = 8.dp)
+                                    .size(40.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                                    .combinedClickable(
+                                        onClick = {
+                                            followTail = true
+                                            vm.sendNow(composed.trim(), pendingImages)
+                                            setInput("")
+                                            pendingImages = emptyList()
+                                            pendingTextFiles = emptyList()
+                                        },
+                                        onLongClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            sendMenu = true
+                                        },
+                                    ),
                             ) {
                                 Icon(
-                                    Icons.Filled.Add,
-                                    contentDescription = "Queue message",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send now",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(20.dp),
                                 )
+                                DropdownMenu(expanded = sendMenu, onDismissRequest = { sendMenu = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text("Send at end of turn") },
+                                        onClick = {
+                                            sendMenu = false
+                                            vm.queueMessage(composed.trim(), pendingImages)
+                                            setInput("")
+                                            pendingImages = emptyList()
+                                            pendingTextFiles = emptyList()
+                                        },
+                                    )
+                                }
                             }
                         } else {
                             // Plain Box instead of IconButton: IconButton enforces a 48dp minimum

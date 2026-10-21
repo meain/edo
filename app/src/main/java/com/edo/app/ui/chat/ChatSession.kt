@@ -121,6 +121,12 @@ class ChatSession internal constructor(
         _state.update { it.copy(queuedMessages = it.queuedMessages + QueuedMessage(text, images)) }
     }
 
+    /** Interrupt the current run and send this message in its place. */
+    fun sendNow(text: String, images: List<Pair<String, String>> = emptyList()) {
+        queueMessage(text, images)
+        sendQueuedNow(_state.value.queuedMessages.lastIndex)
+    }
+
     fun cancelQueue(index: Int) {
         _state.update { it.copy(queuedMessages = it.queuedMessages.toMutableList().apply { removeAt(index) }) }
     }

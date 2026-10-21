@@ -129,6 +129,11 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
         active?.queueMessage(text, images)
     }
 
+    /** Interrupt the run and send this message right away. */
+    fun sendNow(text: String, images: List<Pair<String, String>> = emptyList()) {
+        active?.sendNow(text, images)
+    }
+
     /** Discard a queued message by index. */
     fun cancelQueue(index: Int) = active?.cancelQueue(index)
 
