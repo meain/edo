@@ -7,7 +7,19 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -114,7 +126,7 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
     var editing by remember { mutableStateOf<ScheduleEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<ScheduleEntity?>(null) }
-    var historyFor by remember { mutableStateOf<ScheduleEntity?>(null) }
+    var expandedId by rememberSaveable { mutableLongStateOf(-1L) }
     val runningIds by container.scheduler.running.collectAsState()
     // Re-checked on each recomposition so the banner clears after returning from system settings.
     val exactOk = container.scheduler.canScheduleExact()
@@ -192,11 +204,16 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
                     modifier = Modifier.padding(16.dp),
                 )
             } else {
-                LazyColumn {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     items(schedules, key = { it.id }) { s ->
-                        ScheduleRow(
-                            s,
+                        ScheduleCard(
+                            container, s,
                             running = s.id in runningIds,
+                            expanded = expandedId == s.id,
+                            onToggleExpand = { expandedId = if (expandedId == s.id) -1L else s.id },
                             onEdit = { editing = s },
                             onToggle = { on -> scope.launch { container.scheduler.save(s.copy(enabled = on)) } },
                             onRunNow = {
@@ -205,7 +222,10 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
                                 // or drop its notification.
                                 container.appScope.launch { container.scheduler.run(s) }
                             },
-                            onHistory = { historyFor = s },
+                            onOpenThread = { id ->
+                                container.setActiveThread(id)
+                                onBack()
+                            },
                             onDelete = { confirmDelete = s },
                         )
                     }
@@ -238,18 +258,6 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
         }
     }
 
-    historyFor?.let { s ->
-        RunHistoryDialog(
-            container, s,
-            onOpenThread = { id ->
-                container.setActiveThread(id)
-                historyFor = null
-                onBack()
-            },
-            onDismiss = { historyFor = null },
-        )
-    }
-
     confirmDelete?.let { s ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
@@ -266,80 +274,125 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
     }
 }
 
+private fun isFailure(status: String) = status == "FAILED" || status == "TIMEOUT"
+
 @Composable
-private fun ScheduleRow(
+private fun statusColor(status: String, enabled: Boolean = true): Color = when {
+    !enabled -> MaterialTheme.colorScheme.outline
+    isFailure(status) -> MaterialTheme.colorScheme.error
+    status == "OK" -> MaterialTheme.colorScheme.primary
+    else -> MaterialTheme.colorScheme.outlineVariant
+}
+
+/** One schedule as a card; tapping expands the prompt, actions and run history in place. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ScheduleCard(
+    container: AppContainer,
     s: ScheduleEntity,
     running: Boolean,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
     onEdit: () -> Unit,
     onToggle: (Boolean) -> Unit,
     onRunNow: () -> Unit,
-    onHistory: () -> Unit,
+    onOpenThread: (Long) -> Unit,
     onDelete: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onEdit)
-            .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (s.enabled) MaterialTheme.colorScheme.surfaceContainerHigh
+            else MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(s.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                describe(s),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (!s.totalUsage().isEmpty) {
-                Text(
-                    "All runs: ${s.totalUsage().label()}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+        Column(Modifier.animateContentSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleExpand)
+                    .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (running) {
+                    CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 2.dp)
+                } else {
+                    Box(Modifier.size(10.dp).background(statusColor(s.lastStatus, s.enabled), CircleShape))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        s.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (s.enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val next = when {
+                        running -> "running…"
+                        !s.enabled -> "off"
+                        s.nextRunAt > 0 -> "next ${stamp(s.nextRunAt)}"
+                        else -> ""
+                    }
+                    val failed = !running && isFailure(s.lastStatus)
+                    Text(
+                        listOf(cadence(s), next, if (failed) "last run failed" else "").filter { it.isNotEmpty() }.joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Pill(kindLabel(s), if (s.enabled) kindColor(s) else MaterialTheme.colorScheme.outline)
+                Switch(
+                    checked = s.enabled,
+                    onCheckedChange = onToggle,
+                    modifier = Modifier.padding(start = 4.dp).scale(0.8f),
                 )
             }
-            val last = if (running) "Running…" else lastRunLabel(s)
-            if (last.isNotEmpty()) {
-                Text(
-                    last,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (!running && (s.lastStatus == "FAILED" || s.lastStatus == "TIMEOUT")) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
+            if (expanded) {
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column {
+                        Text("Prompt", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                        Text(s.prompt, style = MaterialTheme.typography.bodyMedium, maxLines = 8, overflow = TextOverflow.Ellipsis)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = onRunNow, enabled = !running) {
+                            Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Run now")
+                        }
+                        OutlinedButton(onClick = onEdit) {
+                            Icon(Icons.Filled.Edit, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Edit")
+                        }
+                        Spacer(Modifier.weight(1f))
+                        IconButton(onClick = onDelete) {
+                            Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    RunHistory(container, s, onOpenThread)
+                }
             }
         }
-        if (running) {
-            CircularProgressIndicator(modifier = Modifier.padding(horizontal = 8.dp).size(18.dp), strokeWidth = 2.dp)
-        }
-        var menuOpen by remember { mutableStateOf(false) }
-        Box {
-            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.MoreVert, "More", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Run now") },
-                    leadingIcon = { Icon(Icons.Filled.PlayArrow, null) },
-                    enabled = !running,
-                    onClick = { menuOpen = false; onRunNow() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Run history") },
-                    leadingIcon = { Icon(Icons.Filled.History, null) },
-                    onClick = { menuOpen = false; onHistory() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                    leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                    onClick = { menuOpen = false; onDelete() },
-                )
-            }
-        }
-        Switch(checked = s.enabled, onCheckedChange = onToggle, modifier = Modifier.padding(horizontal = 8.dp))
+    }
+}
+
+@Composable
+private fun Pill(text: String, color: Color) {
+    Surface(color = color.copy(alpha = 0.12f), shape = MaterialTheme.shapes.small) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
     }
 }
 
@@ -537,13 +590,31 @@ private fun formatMinute(m: Int) ="%02d:%02d".format(m / 60, m % 60)
 private fun stamp(epoch: Long) =
     STAMP.format(Instant.ofEpochMilli(epoch).atZone(ZoneId.systemDefault()))
 
-private fun describe(s: ScheduleEntity): String {
-    val base = when (ScheduleKind.from(s.kind)) {
-        ScheduleKind.ONCE -> "Once"
+private fun kindLabel(s: ScheduleEntity) = when (ScheduleKind.from(s.kind)) {
+    ScheduleKind.ONCE -> "Once"
+    ScheduleKind.INTERVAL -> "Interval"
+    ScheduleKind.DAILY -> "Daily"
+    ScheduleKind.WEEKLY -> "Weekly"
+    ScheduleKind.MONTHLY -> "Monthly"
+}
+
+@Composable
+private fun kindColor(s: ScheduleEntity): Color = when (ScheduleKind.from(s.kind)) {
+    ScheduleKind.DAILY -> MaterialTheme.colorScheme.primary
+    ScheduleKind.WEEKLY -> MaterialTheme.colorScheme.tertiary
+    ScheduleKind.MONTHLY -> MaterialTheme.colorScheme.secondary
+    ScheduleKind.INTERVAL -> Color(0xFF2E7D6B)
+    ScheduleKind.ONCE -> MaterialTheme.colorScheme.outline
+}
+
+/** The schedule's timing without the kind word, which the kind chip already shows. */
+private fun cadence(s: ScheduleEntity): String {
+    return when (ScheduleKind.from(s.kind)) {
+        ScheduleKind.ONCE -> ""
         ScheduleKind.INTERVAL ->
-            if (s.intervalMinutes % 60 == 0) "Every ${s.intervalMinutes / 60} h" else "Every ${s.intervalMinutes} min"
-        ScheduleKind.DAILY -> "Daily at ${formatMinute(s.minuteOfDay)}"
-        ScheduleKind.MONTHLY -> "Monthly on the ${ordinal(s.dayOfMonth)} at ${formatMinute(s.minuteOfDay)}"
+            if (s.intervalMinutes % 60 == 0) "every ${s.intervalMinutes / 60} h" else "every ${s.intervalMinutes} min"
+        ScheduleKind.DAILY -> formatMinute(s.minuteOfDay)
+        ScheduleKind.MONTHLY -> "the ${ordinal(s.dayOfMonth)}, ${formatMinute(s.minuteOfDay)}"
         ScheduleKind.WEEKLY -> {
             val days = when (s.daysMask) {
                 0b0011111 -> "Weekdays"
@@ -551,10 +622,9 @@ private fun describe(s: ScheduleEntity): String {
                 else -> DayOfWeek.values().filter { s.daysMask and (1 shl (it.value - 1)) != 0 }
                     .joinToString(", ") { it.getDisplayName(TextStyle.SHORT, Locale.getDefault()) }
             }
-            "$days at ${formatMinute(s.minuteOfDay)}"
+            "$days ${formatMinute(s.minuteOfDay)}"
         }
     }
-    return if (s.enabled && s.nextRunAt > 0) "$base · next ${stamp(s.nextRunAt)}" else "$base · off"
 }
 
 private fun lastRunLabel(s: ScheduleEntity): String = when {
@@ -569,64 +639,66 @@ private fun durationLabel(ms: Long): String {
     return if (s < 60) "${s}s" else "${s / 60}m ${s % 60}s"
 }
 
-/** The last runs of [s], newest first; tapping one opens its chat if it still exists. */
+/** The last runs of [s], newest first, with lifetime usage; tapping one opens its chat if it still exists. */
 @Composable
-private fun RunHistoryDialog(
-    container: AppContainer,
-    s: ScheduleEntity,
-    onOpenThread: (Long) -> Unit,
-    onDismiss: () -> Unit,
-) {
+private fun RunHistory(container: AppContainer, s: ScheduleEntity, onOpenThread: (Long) -> Unit) {
     val runs by remember(s.id) { container.db.scheduleRuns().observeForSchedule(s.id) }
         .collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Run history · ${s.title}") },
-        text = {
-            if (runs.isEmpty()) {
-                Text("No runs yet.", style = MaterialTheme.typography.bodyMedium)
-            } else {
-                LazyColumn {
-                    if (!s.totalUsage().isEmpty) {
-                        item {
-                            Text(
-                                "All runs: ${s.totalUsage().label()}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(bottom = 4.dp),
-                            )
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Run history",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (!s.totalUsage().isEmpty) {
+                Text(
+                    "All runs: ${s.totalUsage().label()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (runs.isEmpty()) {
+            Text(
+                "No runs yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        runs.forEach { r ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = r.threadId > 0) {
+                        scope.launch {
+                            if (container.db.threads().getById(r.threadId) != null) onOpenThread(r.threadId)
                         }
                     }
-                    items(runs, key = { it.id }) { r ->
-                        val failed = r.status == "FAILED" || r.status == "TIMEOUT"
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = r.threadId > 0) {
-                                    scope.launch {
-                                        if (container.db.threads().getById(r.threadId) != null) onOpenThread(r.threadId)
-                                    }
-                                }
-                                .padding(vertical = 6.dp),
-                        ) {
-                            Text(
-                                "${stamp(r.startedAt)} · ${r.status.lowercase()} · ${durationLabel(r.durationMs)}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                            )
-                            if (!r.usage().isEmpty) {
-                                Text(
-                                    r.usage().label(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(8.dp).background(statusColor(r.status), CircleShape))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stamp(r.startedAt), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        r.status.lowercase() + " · " + durationLabel(r.durationMs),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isFailure(r.status)) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (!r.usage().isEmpty) {
+                    Text(
+                        r.usage().label(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+        }
+    }
 }
