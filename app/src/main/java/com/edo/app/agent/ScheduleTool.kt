@@ -25,6 +25,8 @@ import java.util.Locale
 class ScheduleTool(
     private val scheduler: ScheduleManager,
     private val projectId: Long,
+    /** The schedule that started this chat, or null when it didn't come from one. */
+    private val ownSchedule: suspend () -> Long?,
 ) : Tool {
     override val spec = ToolSpec(
         name = "schedule",
@@ -36,10 +38,11 @@ class ScheduleTool(
             "`time`), interval (needs `every_minutes`, at least $MIN_INTERVAL_MINUTES), daily (needs " +
             "`time`), weekly (needs `days` and `time`), monthly (needs `day_of_month` and `time`; short " +
             "months run on their last day). For update, pass the id plus only the fields to " +
-            "change; get first if you need the current values.",
+            "change; get first if you need the current values. In a chat that was started by a " +
+            "schedule, pass id \"me\" for that schedule instead of listing and guessing.",
         parametersJson = """{"type":"object","properties":{
 "action":{"type":"string","enum":["create","list","get","update","delete","enable","disable"]},
-"id":{"type":"integer","description":"Schedule id, for get / update / delete / enable / disable"},
+"id":{"type":"string","description":"Schedule id (a number), or \"me\" for the schedule that started this chat; for get / update / delete / enable / disable"},
 "title":{"type":"string","description":"Short name shown in the notification"},
 "prompt":{"type":"string","description":"What the scheduled run should do"},
 "repeat":{"type":"string","enum":["once","interval","daily","weekly","monthly"]},
@@ -190,7 +193,12 @@ class ScheduleTool(
     }
 
     private suspend fun withSchedule(args: JsonObject, block: suspend (ScheduleEntity) -> ToolResult): ToolResult {
-        val id = args["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return err("missing 'id'")
+        val raw = args["id"]?.jsonPrimitive?.contentOrNull?.trim() ?: return err("missing 'id'")
+        val id = if (raw.equals("me", ignoreCase = true)) {
+            ownSchedule() ?: return err("this chat was not started by a schedule, so there is no \"me\"; use a numeric id from list")
+        } else {
+            raw.toLongOrNull() ?: return err("'id' must be a number or \"me\"")
+        }
         val s = scheduler.get(id)?.takeIf { it.projectId == projectId } ?: return err("no schedule $id in this project")
         return block(s)
     }

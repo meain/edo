@@ -84,6 +84,9 @@ class ChatSession internal constructor(
      */
     internal var unattended = false
 
+    /** The schedule driving this run, so the schedule tool can resolve "me"; 0 for ordinary chats. */
+    internal var scheduleId = 0L
+
     /** Title for the thread created by the first message, instead of the message text. */
     internal var initialTitle: String? = null
 
@@ -353,7 +356,9 @@ class ChatSession internal constructor(
         }
         val tools = ToolRegistry(
             listOfNotNull(
-                ScheduleTool(container.scheduler, projectId),
+                ScheduleTool(container.scheduler, projectId) {
+                    scheduleId.takeIf { it > 0 } ?: container.scheduler.scheduleForThread(threadId)
+                },
                 ReadTool(ws),
                 WriteFileTool(ws),
                 EditFileTool(ws),
@@ -517,4 +522,5 @@ class ChatSession internal constructor(
 private const val UNATTENDED_NOTE = "\n\n# Scheduled run\n\n" +
     "This is an unattended, scheduled run. Nobody can answer questions or approve actions, so " +
     "don't ask; tools that need approval will be denied unless the project allows them. Keep the " +
-    "final reply short, since it is shown in a notification."
+    "final reply short, since it is shown in a notification. This run's own schedule has the id " +
+    "\"me\" in the schedule tool, e.g. to read or change its prompt or timing."

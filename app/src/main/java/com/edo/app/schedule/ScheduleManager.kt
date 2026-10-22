@@ -70,6 +70,16 @@ class ScheduleManager(private val app: Application, private val container: AppCo
 
     suspend fun get(id: Long): ScheduleEntity? = dao.getById(id)
 
+    /**
+     * The schedule that started chat [threadId]. A run is only logged once it ends, so a chat reopened
+     * after that is found through the run history, or failing that as a schedule's latest chat.
+     */
+    suspend fun scheduleForThread(threadId: Long): Long? {
+        if (threadId <= 0) return null
+        return container.db.scheduleRuns().scheduleIdForThread(threadId)
+            ?: dao.listAll().firstOrNull { it.lastThreadId == threadId }?.id
+    }
+
     suspend fun delete(s: ScheduleEntity) {
         container.db.scheduleRuns().deleteForSchedule(s.id)
         dao.delete(s)
@@ -157,6 +167,7 @@ class ScheduleManager(private val app: Application, private val container: AppCo
             }
             val stamp = RUN_TITLE_FORMAT.format(Instant.ofEpochMilli(startedAt).atZone(ZoneId.systemDefault()))
             session.initialTitle = "${s.title} · $stamp"
+            session.scheduleId = s.id
             session.send(s.prompt)
             val finished = withTimeoutOrNull(RUN_TIMEOUT_MS) { session.awaitIdle(); true }
             if (finished == null) session.cancelAgent()

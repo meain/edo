@@ -308,6 +308,10 @@ interface ScheduleRunDao {
     @Query("SELECT * FROM schedule_runs")
     fun observeAll(): Flow<List<ScheduleRunEntity>>
 
+    /** The schedule whose run created chat [threadId], if the run is still in the history. */
+    @Query("SELECT schedule_id FROM schedule_runs WHERE thread_id = :threadId LIMIT 1")
+    suspend fun scheduleIdForThread(threadId: Long): Long?
+
     @Query("SELECT * FROM schedule_runs WHERE schedule_id = :scheduleId ORDER BY started_at DESC")
     fun observeForSchedule(scheduleId: Long): Flow<List<ScheduleRunEntity>>
 
