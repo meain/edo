@@ -736,6 +736,18 @@ fun ChatScreen(
                                     Text("Send now", style = MaterialTheme.typography.labelSmall)
                                 }
                                 TextButton(
+                                    onClick = {
+                                        // Back into the input box so it can be changed and sent again.
+                                        vm.cancelQueue(index)
+                                        setInput(if (input.isBlank()) queued.text else input + "\n" + queued.text)
+                                        pendingImages = pendingImages + queued.images
+                                    },
+                                    modifier = Modifier.height(24.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                ) {
+                                    Text("Edit", style = MaterialTheme.typography.labelSmall)
+                                }
+                                TextButton(
                                     onClick = { vm.cancelQueue(index) },
                                     modifier = Modifier.height(24.dp),
                                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
