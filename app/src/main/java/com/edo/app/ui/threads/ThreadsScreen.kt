@@ -304,6 +304,7 @@ fun ThreadsScreen(
                         scope.launch {
                             container.chatSessions.discard(thread.id)
                             container.db.messages().clearThread(thread.id)
+                            container.db.compactions().deleteForThread(thread.id)
                             container.db.threads().delete(thread)
                             if (activeThreadId == thread.id) container.setActiveThread(-1L)
                         }

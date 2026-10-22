@@ -5,7 +5,7 @@ Claude-Code-style agent app for Android. Kotlin + Jetpack Compose, Material 3 wi
 ## Architecture
 
 - `app/src/main/java/com/edo/app/`
-  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`, `ScheduleRunEntity`, `UsageEventEntity`; currently v17), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
+  - `data/` — Room DB (`ProjectEntity`, `ThreadEntity`, `MessageEntity`, `ScheduleEntity`, `ScheduleRunEntity`, `UsageEventEntity`; currently v18), encrypted prefs (`Settings.kt`) for provider/key/model/OpenRouter options/active IDs
   - `llm/` — `AnthropicClient`, `OpenAIClient` (also used for OpenRouter, with `OpenRouterOptions.requestExtras`), `fetchModelIds` for model autocomplete, shared `LlmClient` + streaming `LlmEvent` types
   - `agent/` — `Agent` loop, `ApprovalGate`, tools, `SafWorkspace` / `FileWorkspace` / `InMemoryWorkspace`
   - `schedule/` — `ScheduleManager` (save/run/re-arm), `Recurrence` (next-run maths), `ScheduleReceiver` (alarm + boot/time broadcasts), `ScheduleNotifier`
@@ -69,7 +69,8 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 ## Compacting a chat
 
 - "Compact into new chat" in the chat overflow menu (`ChatSession.compact`, run on the app scope): the chat's own model (not the side-task model) summarises a plain-text transcript (`compactionTranscript`: tool args and results and attached files are cut short), a new thread titled "… (compacted)" opens with that summary as a user message plus a canned assistant acknowledgement, and the UI switches to it. The call's usage is recorded on the old chat.
-- The old thread's `compacted_into_id` (v17) drives the "Compacted into a new chat · Open" banner. It lives on the thread row only and is never put in the conversation, so the model can't see the link; keep it that way.
+- A chat can be compacted at several points, so each compaction is a `compactions` row (v18: `thread_id`, `after_message_id`, `new_thread_id`). `ChatScreen` shows it as an inline "Chat compacted here. Continue in the new chat." line right after that message, so messages sent later appear below it. The new thread's `compacted_from_id` (v18) drives the "Continued from … Open the original" line at the very top of the new chat. `ThreadEntity.compacted_into_id` (v17) is superseded and unused; it stays only so existing databases match the schema.
+- Both are UI-only and never put in the conversation, so the model can't see the links; keep it that way. Deleting a chat deletes its `compactions` rows (`CompactionDao.deleteForThread`).
 
 ## Tool call details
 
@@ -139,4 +140,4 @@ Each project's agent must only reach its own folder. The OS boundary is the per-
 - A file sent with a message is inlined as an `<attached_file>` block (`AttachedFiles.kt`); there is no file on disk, so opening it externally writes the text to the cache first.
 - Anything handed to another app through `FileProvider` must live under a directory declared in `res/xml/file_paths.xml` (`captures/`, `open/`), or `getUriForFile` throws.
 - OpenRouter extras are plain request-body fields (`provider.only/ignore/sort/...`, `models`, `reasoning`) merged over the normal body; the user's raw JSON wins. The field names were written from memory, not checked against OpenRouter's current docs.
-- Room uses explicit migrations (3→4 … 16→17) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.
+- Room uses explicit migrations (3→4 … 17→18) but still `fallbackToDestructiveMigration`, so a missing migration silently wipes data — add one for every schema bump.

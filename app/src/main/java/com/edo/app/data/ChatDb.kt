@@ -70,11 +70,45 @@ data class ThreadEntity(
     /** Started by a schedule rather than by the user; the chat list marks these with an alarm icon. */
     @ColumnInfo(name = "from_schedule", defaultValue = "0") val fromSchedule: Boolean = false,
     /**
-     * The chat this one was compacted into, or 0. Only the UI reads it: it is never put in the
-     * conversation, so the model can't see the link.
+     * Superseded by [CompactionEntity] in v18 and no longer read or written; the column stays so
+     * existing databases keep matching the schema.
      */
     @ColumnInfo(name = "compacted_into_id", defaultValue = "0") val compactedIntoId: Long = 0,
+    /**
+     * The chat this one was created from by compacting it, or 0. Only the UI reads it (for the link
+     * back at the top of the chat); it is never put in the conversation. Where in the original the
+     * compaction happened is in [CompactionEntity].
+     */
+    @ColumnInfo(name = "compacted_from_id", defaultValue = "0") val compactedFromId: Long = 0,
 )
+
+/**
+ * One compaction of a chat: the chat [threadId] was summarised into [newThreadId] right after
+ * its message [afterMessageId]. A chat can be compacted more than once, at different points, so
+ * the UI shows each link inline where it happened. Only the UI reads this; it is never put in
+ * the conversation, so the model can't see the links.
+ */
+@Entity(tableName = "compactions", indices = [Index("thread_id"), Index("new_thread_id")])
+data class CompactionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "thread_id") val threadId: Long,
+    @ColumnInfo(name = "after_message_id") val afterMessageId: Long,
+    @ColumnInfo(name = "new_thread_id") val newThreadId: Long,
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+)
+
+@Dao
+interface CompactionDao {
+    @Insert
+    suspend fun insert(c: CompactionEntity): Long
+
+    /** Where chat [threadId] was compacted, oldest first. */
+    @Query("SELECT * FROM compactions WHERE thread_id = :threadId ORDER BY after_message_id, id")
+    fun observeForThread(threadId: Long): Flow<List<CompactionEntity>>
+
+    @Query("DELETE FROM compactions WHERE thread_id = :threadId OR new_thread_id = :threadId")
+    suspend fun deleteForThread(threadId: Long)
+}
 
 @Dao
 interface ThreadDao {
@@ -115,9 +149,6 @@ interface ThreadDao {
 
     @Query("UPDATE threads SET title = :title, last_updated_at = :ts WHERE id = :id")
     suspend fun updateTitleAndTimestamp(id: Long, title: String, ts: Long)
-
-    @Query("UPDATE threads SET compacted_into_id = :newId WHERE id = :id")
-    suspend fun setCompactedInto(id: Long, newId: Long)
 
     @Query("UPDATE threads SET last_updated_at = :ts WHERE id = :id")
     suspend fun touch(id: Long, ts: Long = System.currentTimeMillis())
@@ -346,9 +377,9 @@ interface ScheduleRunDao {
 @Database(
     entities = [
         ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class,
-        ScheduleRunEntity::class, UsageEventEntity::class,
+        ScheduleRunEntity::class, UsageEventEntity::class, CompactionEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -358,6 +389,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun schedules(): ScheduleDao
     abstract fun scheduleRuns(): ScheduleRunDao
     abstract fun usageEvents(): UsageEventDao
+    abstract fun compactions(): CompactionDao
 
     companion object {
         @Volatile private var instance: ChatDatabase? = null
@@ -540,13 +572,38 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v17 → v18: compactions get their own table so a chat can be compacted at several points. */
+        private val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS compactions (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, thread_id INTEGER NOT NULL, " +
+                        "after_message_id INTEGER NOT NULL, new_thread_id INTEGER NOT NULL, created_at INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_compactions_thread_id ON compactions (thread_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_compactions_new_thread_id ON compactions (new_thread_id)")
+                // The new chat remembers where it came from; fill that in for links made under v17.
+                db.execSQL("ALTER TABLE threads ADD COLUMN compacted_from_id INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "UPDATE threads SET compacted_from_id = COALESCE(" +
+                        "(SELECT t.id FROM threads t WHERE t.compacted_into_id = threads.id LIMIT 1), 0)"
+                )
+                // Links made under v17 had no position: anchor them after the chat's last message.
+                db.execSQL(
+                    "INSERT INTO compactions (thread_id, after_message_id, new_thread_id, created_at) " +
+                        "SELECT id, COALESCE((SELECT MAX(id) FROM messages WHERE thread_id = threads.id), 0), " +
+                        "compacted_into_id, last_updated_at FROM threads WHERE compacted_into_id > 0"
+                )
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }

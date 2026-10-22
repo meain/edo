@@ -27,6 +27,7 @@ import com.edo.app.agent.Workspace
 import com.edo.app.agent.WriteFileTool
 import com.edo.app.agent.buildSystemPrompt
 import com.edo.app.data.AppSettings
+import com.edo.app.data.CompactionEntity
 import com.edo.app.data.ProjectEntity
 import com.edo.app.data.UsageEventEntity
 import com.edo.app.data.Provider
@@ -332,9 +333,10 @@ class ChatSession internal constructor(
     }
 
     /**
-     * Summarise this chat into a new one that opens with the summary, link the old chat to it and
-     * switch over. The link lives on the thread row only and never enters the conversation, so the
-     * model can't see it. A failure shows as the chat's error and changes nothing.
+     * Summarise this chat into a new one that opens with the summary, record where the old chat was
+     * compacted and switch over. The link lives in the `compactions` table only and never enters
+     * the conversation, so the model can't see it. The old chat stays usable and can be compacted
+     * again later. A failure shows as the chat's error and changes nothing.
      */
     suspend fun compact() {
         val oldId = threadId
@@ -347,6 +349,8 @@ class ChatSession internal constructor(
         }
         runProvider = settings.provider
         runModel = settings.model
+        // The link goes right after the last message that was summarised; later messages land below it.
+        val anchor = _state.value.messages.lastOrNull()?.id ?: 0L
         _state.update { it.copy(compacting = true, error = null) }
         try {
             val summary = StringBuilder()
@@ -377,13 +381,15 @@ class ChatSession internal constructor(
                     title = (old.title.removeSuffix(" (compacted)") + " (compacted)").take(60),
                     createdAt = now,
                     lastUpdatedAt = now,
+                    compactedFromId = oldId,
                 )
             )
             val messages = container.db.messages()
             messages.insert(uiToRow(ConvMessage(Role.User, listOf(Block.Text(compactedOpening(text)))), newId))
             messages.insert(uiToRow(ConvMessage(Role.Assistant, listOf(Block.Text(COMPACTED_ACK))), newId))
-            container.db.threads().setCompactedInto(oldId, newId)
-            _state.update { it.copy(currentThread = container.db.threads().getById(oldId)) }
+            container.db.compactions().insert(
+                CompactionEntity(threadId = oldId, afterMessageId = anchor, newThreadId = newId, createdAt = now)
+            )
             // Follow the user to the new chat, unless they have already gone elsewhere.
             if (container.activeProjectId.value == projectId && container.activeThreadId.value == oldId) {
                 container.setActiveThread(newId)

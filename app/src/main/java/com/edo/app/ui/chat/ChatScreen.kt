@@ -149,6 +149,12 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -156,6 +162,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.edo.app.AppContainer
 import com.edo.app.EdoApp
+import com.edo.app.data.CompactionEntity
 import com.edo.app.data.formatTokens
 import com.edo.app.data.usage
 import com.edo.app.ui.openTextExternally
@@ -391,26 +398,48 @@ fun ChatScreen(
     }
     // Flatten messages into list items: text messages stay as-is, and consecutive tool
     // calls (with no text between them) collapse into one ToolGroup.
-    val chatItems = remember(state.messages) {
+    // Compaction links: where this chat was compacted (inline, at that point) and, if it was
+    // itself made by a compaction, where it came from (at the very top). Only the UI knows about
+    // them; the model never sees them.
+    val currentThreadId = state.currentThread?.id ?: -1L
+    val compactions by remember(currentThreadId) { container.db.compactions().observeForThread(currentThreadId) }
+        .collectAsState(initial = emptyList())
+    val compactedFromId = state.currentThread?.compactedFromId ?: 0L
+    // Null until looked up, and when the original chat has been deleted: then there is nothing to link to.
+    var sourceTitle by remember(compactedFromId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(compactedFromId) {
+        sourceTitle = if (compactedFromId > 0) container.db.threads().getById(compactedFromId)?.title else null
+    }
+    val chatItems = remember(state.messages, compactions, compactedFromId, sourceTitle) {
         buildList<ChatItem> {
+            sourceTitle?.let { add(ChatItem.CompactedFrom(compactedFromId, it)) }
+            val pending = compactions.toMutableList()
             for (msg in state.messages) {
                 if (msg.role == Role.User) {
                     if (msg.blocks.any { it !is Block.ToolResult }) add(ChatItem.Msg(msg))
-                    continue
-                }
-                if (msg.role != Role.Assistant) continue
-                // Models often emit "\n\n" before a tool call; that is not a message and must not split a tool group.
-                if (msg.blocks.any { it is Block.Text && it.text.isNotBlank() }) add(ChatItem.Msg(msg))
-                val uses = msg.blocks.filterIsInstance<Block.ToolUse>()
-                if (uses.isNotEmpty()) {
-                    val last = lastOrNull()
-                    if (last is ChatItem.ToolGroup) {
-                        this[lastIndex] = last.copy(uses = last.uses + uses)
-                    } else {
-                        add(ChatItem.ToolGroup(uses.first().id, uses))
+                } else if (msg.role == Role.Assistant) {
+                    // Models often emit "\n\n" before a tool call; that is not a message and must not split a tool group.
+                    if (msg.blocks.any { it is Block.Text && it.text.isNotBlank() }) add(ChatItem.Msg(msg))
+                    val uses = msg.blocks.filterIsInstance<Block.ToolUse>()
+                    if (uses.isNotEmpty()) {
+                        val last = lastOrNull()
+                        if (last is ChatItem.ToolGroup) {
+                            this[lastIndex] = last.copy(uses = last.uses + uses)
+                        } else {
+                            add(ChatItem.ToolGroup(uses.first().id, uses))
+                        }
                     }
                 }
+                // A compaction sits right after the last message it summarised.
+                pending.filter { it.afterMessageId <= msg.id }.forEach { add(ChatItem.Compacted(it)); pending.remove(it) }
             }
+            pending.forEach { add(ChatItem.Compacted(it)) }
+        }
+    }
+    val openChat: (Long) -> Unit = { id ->
+        scope.launch {
+            if (container.db.threads().getById(id) != null) container.setActiveThread(id)
+            else android.widget.Toast.makeText(context, "That chat was deleted", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -605,6 +634,12 @@ fun ChatScreen(
                             when (item) {
                                 is ChatItem.Msg ->
                                     MessageBubble(item.msg, expandedToolIds) { viewingImage = it }
+                                is ChatItem.Compacted -> CompactionNote("Chat compacted here. ", "Continue in the new chat") {
+                                    openChat(item.compaction.newThreadId)
+                                }
+                                is ChatItem.CompactedFrom -> CompactionNote(
+                                    "Continued from ${item.title.ifBlank { "an earlier chat" }}. ", "Open the original",
+                                ) { openChat(item.sourceId) }
                                 is ChatItem.ToolGroup -> {
                                     // Fold once something follows the group (or the run is over).
                                     val folded = index < chatItems.lastIndex ||
@@ -740,33 +775,6 @@ fun ChatScreen(
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        }
-                    }
-                    val compactedInto = state.currentThread?.compactedIntoId ?: 0L
-                    if (compactedInto > 0) {
-                        // Only the UI knows about this link; the model never sees it.
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            shape = MaterialTheme.shapes.small,
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
-                                .clickable { container.setActiveThread(compactedInto) },
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    "Compacted into a new chat",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    "Open",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
                         }
                     }
                     state.queuedMessages.forEachIndexed { index, queued ->
@@ -1462,6 +1470,37 @@ private sealed interface ChatItem {
     data class ToolGroup(val firstId: String, val uses: List<Block.ToolUse>) : ChatItem {
         override val key get() = "tools-$firstId"
     }
+
+    /** Inline marker where the chat was compacted, linking to the chat that was started from it. */
+    data class Compacted(val compaction: CompactionEntity) : ChatItem {
+        override val key get() = "compacted-${compaction.id}"
+    }
+
+    /** First line of a chat made by compacting another, linking back to the original. */
+    data class CompactedFrom(val sourceId: Long, val title: String) : ChatItem {
+        override val key get() = "compacted-from"
+    }
+}
+
+/** A note with its last words as a link, e.g. "Chat compacted here. Continue in the new chat." */
+@Composable
+private fun CompactionNote(text: String, linkText: String, onOpen: () -> Unit) {
+    val linkColor = MaterialTheme.colorScheme.primary
+    Text(
+        buildAnnotatedString {
+            append(text)
+            withLink(
+                LinkAnnotation.Clickable(
+                    tag = "open-compaction",
+                    styles = TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)),
+                ) { onOpen() }
+            ) { append(linkText) }
+            append(".")
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 4.dp),
+    )
 }
 
 /**
