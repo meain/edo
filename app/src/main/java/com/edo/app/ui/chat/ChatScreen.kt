@@ -99,6 +99,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -1530,6 +1531,7 @@ private fun CompletedToolCard(
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
+    var showDetails by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1571,8 +1573,18 @@ private fun CompletedToolCard(
             }
         }
         AnimatedVisibility(visible = expanded) {
-            ToolExpandedContent(name = name, argsJson = argsJson, result = result, isError = isError)
+            Column {
+                ToolExpandedContent(name = name, argsJson = argsJson, result = result, isError = isError)
+                TextButton(onClick = { showDetails = true }, modifier = Modifier.height(32.dp)) {
+                    Icon(Icons.Filled.OpenInFull, null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Full input & output", style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
+    }
+    if (showDetails) {
+        ToolDetailsDialog(name, argsJson, result, isError, onDismiss = { showDetails = false })
     }
 }
 
@@ -1930,6 +1942,18 @@ private fun ToolExpandedContent(name: String, argsJson: String, result: String?,
                 // Path is shown in header; result is the file content or listing
                 if (result != null) ResultBlock(result, isError)
             }
+            "run_lua" -> {
+                // A preview of the program, highlighted; the details dialog has all of it.
+                val code = strArg("code")
+                if (code != null) {
+                    Text("Code", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(4.dp))
+                    LuaPreview(code)
+                } else if (argsJson.isNotBlank() && argsJson != "{}") {
+                    ArgsBlock(argsJson)
+                }
+                if (result != null) ResultBlock(result, isError)
+            }
             else -> {
                 if (argsJson.isNotBlank() && argsJson != "{}") ArgsBlock(argsJson)
                 if (result != null) ResultBlock(result, isError)
@@ -2008,6 +2032,33 @@ private fun ArgsBlock(argsJson: String) {
                 Text(argsJson, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
             }
         }
+    }
+}
+
+private const val LUA_PREVIEW_LINES = 12
+
+/** The first lines of a Lua program, highlighted. */
+@Composable
+private fun LuaPreview(code: String) {
+    val palette = with(MaterialTheme.colorScheme) {
+        LuaPalette(
+            keyword = primary, string = tertiary, comment = outline,
+            number = secondary, builtin = secondary, functionName = primary,
+        )
+    }
+    val lines = code.lines()
+    val shown = lines.take(LUA_PREVIEW_LINES).joinToString("\n") + if (lines.size > LUA_PREVIEW_LINES) "\n…" else ""
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(bottom = 6.dp).fillMaxWidth(),
+    ) {
+        Text(
+            remember(shown, palette) { highlightLua(shown, palette) },
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(8.dp),
+        )
     }
 }
 
