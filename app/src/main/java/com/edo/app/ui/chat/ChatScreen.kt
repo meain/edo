@@ -153,6 +153,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.edo.app.AppContainer
 import com.edo.app.EdoApp
+import com.edo.app.data.formatTokens
 import com.edo.app.data.usage
 import com.edo.app.ui.openTextExternally
 import com.edo.app.agent.ApprovalDecision
@@ -463,9 +464,16 @@ fun ChatScreen(
                             }
                         }
                         val usage = state.currentThread?.usage()
+                        val threadId = state.currentThread?.id ?: -1L
+                        // Every call resends the whole chat, so the totals grow far past the real context size.
+                        val contextTokens by remember(threadId) { container.db.usageEvents().observeContextTokens(threadId) }
+                            .collectAsState(initial = null)
                         if (usage != null && !usage.isEmpty) {
                             Text(
-                                text = usage.label(),
+                                text = listOfNotNull(
+                                    contextTokens?.let { "${formatTokens(it)} context" },
+                                    usage.label(),
+                                ).joinToString(" · "),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,

@@ -295,6 +295,10 @@ interface UsageEventDao {
     @Query("SELECT * FROM usage_events")
     fun observeAll(): Flow<List<UsageEventEntity>>
 
+    /** Prompt size of the chat's latest model call, i.e. how much context it holds now. */
+    @Query("SELECT input_tokens FROM usage_events WHERE thread_id = :threadId ORDER BY id DESC LIMIT 1")
+    fun observeContextTokens(threadId: Long): Flow<Long?>
+
     @Query("SELECT * FROM usage_events WHERE thread_id = :threadId ORDER BY created_at")
     suspend fun listForThread(threadId: Long): List<UsageEventEntity>
 }
