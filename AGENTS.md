@@ -137,6 +137,7 @@ Each project's agent must only reach its own folder. The OS boundary is the per-
 - Orphaned tool_use messages (assistant messages with unanswered tool calls) are stripped on reload to avoid API rejections.
 - `SwipePanels` drives both panels from one horizontal `draggable`, so a child that consumes horizontal drags (code blocks, lists) wins. The chats panel stays composed offscreen to avoid a first-frame hitch; the files panel is composed on demand.
 - Pulling up past the end of a conversation suggests a new chat; the pull is resisted 2:1 and disabled while the agent runs.
+- Both assistant and user messages render through `MarkdownText`; soft line breaks show as newlines, so typed line breaks in a user message are kept.
 - Message text is selectable through one `SelectionContainer` around the whole list (one per message made scrolling janky). The chat input draft is `rememberSaveable`, so it survives navigation.
 - A file sent with a message is inlined as an `<attached_file>` block (`AttachedFiles.kt`); there is no file on disk, so opening it externally writes the text to the cache first.
 - Anything handed to another app through `FileProvider` must live under a directory declared in `res/xml/file_paths.xml` (`captures/`, `open/`), or `getUriForFile` throws.
