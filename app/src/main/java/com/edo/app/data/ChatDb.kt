@@ -69,6 +69,11 @@ data class ThreadEntity(
     @ColumnInfo(name = "cost_partial", defaultValue = "0") val costPartial: Boolean = false,
     /** Started by a schedule rather than by the user; the chat list marks these with an alarm icon. */
     @ColumnInfo(name = "from_schedule", defaultValue = "0") val fromSchedule: Boolean = false,
+    /**
+     * The chat this one was compacted into, or 0. Only the UI reads it: it is never put in the
+     * conversation, so the model can't see the link.
+     */
+    @ColumnInfo(name = "compacted_into_id", defaultValue = "0") val compactedIntoId: Long = 0,
 )
 
 @Dao
@@ -110,6 +115,9 @@ interface ThreadDao {
 
     @Query("UPDATE threads SET title = :title, last_updated_at = :ts WHERE id = :id")
     suspend fun updateTitleAndTimestamp(id: Long, title: String, ts: Long)
+
+    @Query("UPDATE threads SET compacted_into_id = :newId WHERE id = :id")
+    suspend fun setCompactedInto(id: Long, newId: Long)
 
     @Query("UPDATE threads SET last_updated_at = :ts WHERE id = :id")
     suspend fun touch(id: Long, ts: Long = System.currentTimeMillis())
@@ -340,7 +348,7 @@ interface ScheduleRunDao {
         ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class,
         ScheduleRunEntity::class, UsageEventEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -525,13 +533,20 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v16 → v17: link a compacted chat to the chat that replaced it. */
+        private val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE threads ADD COLUMN compacted_into_id INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }

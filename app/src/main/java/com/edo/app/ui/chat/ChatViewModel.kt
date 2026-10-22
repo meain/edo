@@ -80,6 +80,8 @@ data class ChatUiState(
     val canRetry: Boolean = false,
     val scrollVersion: Int = 0,
     val queuedMessages: List<QueuedMessage> = emptyList(),
+    /** A summary of this chat is being written for a new one. */
+    val compacting: Boolean = false,
 )
 
 /**
@@ -139,6 +141,12 @@ class ChatViewModel(app: Application, private val container: AppContainer) : And
 
     /** Interrupt the run and send the queued message at [index] now. */
     fun sendQueuedNow(index: Int) = active?.sendQueuedNow(index)
+
+    /** Summarise this chat into a new one and switch to it. Runs on the app scope, so leaving doesn't cancel it. */
+    fun compactChat() {
+        val session = active ?: return
+        container.appScope.launch { session.compact() }
+    }
 
     /** Re-run the agent against the current conversation (after all auto-retries exhausted). */
     fun retryAgent() = active?.retry()

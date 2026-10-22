@@ -98,6 +98,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -511,6 +513,13 @@ fun ChatScreen(
                                 onClick = { menuOpen = false; onOpenSchedules() },
                             )
                             DropdownMenuItem(
+                                text = { Text("Compact into new chat") },
+                                leadingIcon = { Icon(Icons.Filled.Compress, contentDescription = null) },
+                                enabled = state.currentThread != null && state.messages.isNotEmpty() &&
+                                    !state.running && !state.compacting,
+                                onClick = { menuOpen = false; vm.compactChat() },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Settings") },
                                 leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                                 onClick = { menuOpen = false; onOpenProjectSettings(state.currentProject!!.id) },
@@ -715,6 +724,47 @@ fun ChatScreen(
                                         )
                                     }
                                 }
+                            }
+                        }
+                    }
+                    if (state.compacting) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "Compacting into a new chat…",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    val compactedInto = state.currentThread?.compactedIntoId ?: 0L
+                    if (compactedInto > 0) {
+                        // Only the UI knows about this link; the model never sees it.
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+                                .clickable { container.setActiveThread(compactedInto) },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "Compacted into a new chat",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    "Open",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
                             }
                         }
                     }

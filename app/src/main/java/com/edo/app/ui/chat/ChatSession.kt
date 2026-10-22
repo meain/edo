@@ -331,6 +331,71 @@ class ChatSession internal constructor(
         _state.update { it.copy(currentThread = container.db.threads().getById(id)) }
     }
 
+    /**
+     * Summarise this chat into a new one that opens with the summary, link the old chat to it and
+     * switch over. The link lives on the thread row only and never enters the conversation, so the
+     * model can't see it. A failure shows as the chat's error and changes nothing.
+     */
+    suspend fun compact() {
+        val oldId = threadId
+        if (oldId <= 0 || conversation.isEmpty() || _state.value.running || _state.value.compacting) return
+        val project = container.db.projects().getById(projectId) ?: return
+        val settings = container.settings.load().withOverrides(project, container.settings.loadProfiles())
+        if (settings.apiKey.isBlank()) {
+            _state.update { it.copy(error = "Add your API key in Settings.") }
+            return
+        }
+        runProvider = settings.provider
+        runModel = settings.model
+        _state.update { it.copy(compacting = true, error = null) }
+        try {
+            val summary = StringBuilder()
+            var failure: String? = null
+            buildLlm(settings).stream(
+                COMPACT_SYSTEM,
+                listOf(ConvMessage(Role.User, listOf(Block.Text(compactionTranscript(conversation))))),
+                emptyList(),
+            ).collect { ev ->
+                when (ev) {
+                    is LlmEvent.TextDelta -> summary.append(ev.text)
+                    is LlmEvent.Usage -> recordUsage(ev.usage)
+                    is LlmEvent.Failure -> failure = ev.message
+                    else -> Unit
+                }
+            }
+            val text = summary.toString().trim()
+            val failed = failure
+            if (failed != null || text.isEmpty()) {
+                _state.update { it.copy(error = "Compacting failed: ${failed ?: "the model returned no summary"}") }
+                return
+            }
+            val old = container.db.threads().getById(oldId) ?: return
+            val now = System.currentTimeMillis()
+            val newId = container.db.threads().insert(
+                ThreadEntity(
+                    projectId = projectId,
+                    title = (old.title.removeSuffix(" (compacted)") + " (compacted)").take(60),
+                    createdAt = now,
+                    lastUpdatedAt = now,
+                )
+            )
+            val messages = container.db.messages()
+            messages.insert(uiToRow(ConvMessage(Role.User, listOf(Block.Text(compactedOpening(text)))), newId))
+            messages.insert(uiToRow(ConvMessage(Role.Assistant, listOf(Block.Text(COMPACTED_ACK))), newId))
+            container.db.threads().setCompactedInto(oldId, newId)
+            _state.update { it.copy(currentThread = container.db.threads().getById(oldId)) }
+            // Follow the user to the new chat, unless they have already gone elsewhere.
+            if (container.activeProjectId.value == projectId && container.activeThreadId.value == oldId) {
+                container.setActiveThread(newId)
+            }
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            _state.update { it.copy(error = "Compacting failed: ${t.message ?: "unknown error"}") }
+        } finally {
+            _state.update { it.copy(compacting = false) }
+        }
+    }
+
     private suspend fun runAgent() {
         val threadId = threadId
         val project = container.db.projects().getById(projectId) ?: run {
