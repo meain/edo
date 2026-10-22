@@ -289,6 +289,9 @@ interface UsageEventDao {
 
     @Query("SELECT * FROM usage_events")
     fun observeAll(): Flow<List<UsageEventEntity>>
+
+    @Query("SELECT * FROM usage_events WHERE thread_id = :threadId ORDER BY created_at")
+    suspend fun listForThread(threadId: Long): List<UsageEventEntity>
 }
 
 @Dao

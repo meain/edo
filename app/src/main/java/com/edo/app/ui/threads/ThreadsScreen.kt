@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.OutlinedTextField
@@ -99,6 +100,7 @@ fun ThreadsScreen(
     }
     var confirmDelete by remember { mutableStateOf<ThreadEntity?>(null) }
     var pickingProject by remember { mutableStateOf(false) }
+    var detailsFor by remember { mutableStateOf<ThreadEntity?>(null) }
     val allProjects by container.db.projects().observeAll().collectAsState(initial = emptyList())
     val focusManager = LocalFocusManager.current
 
@@ -208,6 +210,7 @@ fun ThreadsScreen(
                                 container.setActiveThread(thread.id)
                                 onBack()
                             },
+                            onDetails = { detailsFor = thread },
                             onDelete = { confirmDelete = thread },
                         )
                     }
@@ -286,6 +289,10 @@ fun ThreadsScreen(
         )
     }
 
+    detailsFor?.let { thread ->
+        ChatDetailsDialog(container, thread, onDismiss = { detailsFor = null })
+    }
+
     confirmDelete?.let { thread ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
@@ -316,6 +323,7 @@ private fun ThreadRow(
     thread: ThreadEntity,
     isActive: Boolean,
     onSelect: () -> Unit,
+    onDetails: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val bg = if (isActive) MaterialTheme.colorScheme.secondaryContainer
@@ -356,6 +364,14 @@ private fun ThreadRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            IconButton(onClick = onDetails, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.Filled.Info,
+                    contentDescription = "Chat details",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
             IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Filled.Delete,

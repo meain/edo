@@ -61,7 +61,7 @@ import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 private const val DAY_MS = 86_400_000L
-private val TOOL_NAME = Regex("\"kind\":\"tool_use\",\"id\":\"[^\"]*\",\"name\":\"([^\"]+)\"")
+internal val TOOL_NAME =Regex("\"kind\":\"tool_use\",\"id\":\"[^\"]*\",\"name\":\"([^\"]+)\"")
 
 /** Tokens, cost, chats, messages, tools and schedule runs across every project. */
 @OptIn(ExperimentalMaterial3Api::class)
