@@ -1355,10 +1355,9 @@ private fun MessageBubble(
                             ) {
                                 // Long-press selects text natively (the list is one SelectionContainer);
                                 // the buttons copy / read the whole message.
-                                Text(
+                                MarkdownText(
                                     text = text,
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                    style = MaterialTheme.typography.bodyLarge,
                                 )
                             }
                         }
