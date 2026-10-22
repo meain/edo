@@ -56,6 +56,15 @@ class AppContainer(private val app: Application) {
     private val _activeThreadId = MutableStateFlow(settings.load().activeThreadId)
     val activeThreadId: StateFlow<Long> = _activeThreadId.asStateFlow()
 
+    /**
+     * Where the chat screen should scroll once [ScrollTarget.threadId] has loaded, instead of
+     * following the end of the chat. Set by links that point into the middle of a chat; the chat
+     * screen clears it after using it.
+     */
+    val chatScrollTarget = MutableStateFlow<ScrollTarget?>(null)
+
+    data class ScrollTarget(val threadId: Long, val itemKey: String)
+
     fun setActiveProject(id: Long) {
         if (_activeProjectId.value == id) return
         _activeProjectId.value = id

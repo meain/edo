@@ -439,10 +439,15 @@ fun ChatScreen(
             pending.forEach { add(ChatItem.Compacted(it)) }
         }
     }
-    val openChat: (Long) -> Unit = { id ->
+    // Opens a chat; with [scrollKey] it lands on that list item instead of the end of the chat.
+    val openChat: (Long, String?) -> Unit = { id, scrollKey ->
         scope.launch {
-            if (container.db.threads().getById(id) != null) container.setActiveThread(id)
-            else android.widget.Toast.makeText(context, "That chat was deleted", android.widget.Toast.LENGTH_SHORT).show()
+            if (container.db.threads().getById(id) != null) {
+                scrollKey?.let { container.chatScrollTarget.value = AppContainer.ScrollTarget(id, it) }
+                container.setActiveThread(id)
+            } else {
+                android.widget.Toast.makeText(context, "That chat was deleted", android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -466,6 +471,19 @@ fun ChatScreen(
     LaunchedEffect(streamLen) {
         if (totalItems > 0 && streamLen > 0 && followTail) {
             listState.followBottom(totalItems)
+        }
+    }
+    // A link into the middle of a chat (e.g. "Open the original" on a compacted chat): once that
+    // chat's messages are in, stop following the end and jump to the item, one above it for context.
+    val scrollTarget by container.chatScrollTarget.collectAsState()
+    LaunchedEffect(scrollTarget, chatItems, currentThreadId) {
+        val target = scrollTarget ?: return@LaunchedEffect
+        if (target.threadId != currentThreadId || state.messages.isEmpty()) return@LaunchedEffect
+        container.chatScrollTarget.value = null
+        val index = chatItems.indexOfFirst { it.key == target.itemKey }
+        if (index >= 0) {
+            followTail = false
+            listState.scrollToItem((index - 1).coerceAtLeast(0))
         }
     }
 
@@ -638,11 +656,17 @@ fun ChatScreen(
                                 is ChatItem.Msg ->
                                     MessageBubble(item.msg, expandedToolIds) { viewingImage = it }
                                 is ChatItem.Compacted -> CompactionNote("Chat compacted here. ", "Continue in the new chat") {
-                                    openChat(item.compaction.newThreadId)
+                                    openChat(item.compaction.newThreadId, null)
                                 }
                                 is ChatItem.CompactedFrom -> CompactionNote(
                                     "Continued from ${item.title.ifBlank { "an earlier chat" }}. ", "Open the original",
-                                ) { openChat(item.sourceId) }
+                                ) {
+                                    // Land on the point where this chat was split off, not the end of the original.
+                                    scope.launch {
+                                        val c = container.db.compactions().forNewThread(currentThreadId)
+                                        openChat(item.sourceId, c?.let { "compacted-${it.id}" })
+                                    }
+                                }
                                 is ChatItem.ToolGroup -> {
                                     // Fold once something follows the group (or the run is over).
                                     val folded = index < chatItems.lastIndex ||

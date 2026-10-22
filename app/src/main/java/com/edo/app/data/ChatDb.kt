@@ -106,6 +106,10 @@ interface CompactionDao {
     @Query("SELECT * FROM compactions WHERE thread_id = :threadId ORDER BY after_message_id, id")
     fun observeForThread(threadId: Long): Flow<List<CompactionEntity>>
 
+    /** The compaction that created chat [newThreadId], if it came from one. */
+    @Query("SELECT * FROM compactions WHERE new_thread_id = :newThreadId LIMIT 1")
+    suspend fun forNewThread(newThreadId: Long): CompactionEntity?
+
     @Query("DELETE FROM compactions WHERE thread_id = :threadId OR new_thread_id = :threadId")
     suspend fun deleteForThread(threadId: Long)
 }
