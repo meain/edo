@@ -243,6 +243,9 @@ fun ChatScreen(
     var pendingTextFiles by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     val expandedToolIds = remember { mutableStateMapOf<String, Boolean>() }
     var viewingImage by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    // Held here, not in the tool card: cards leave the list when a group folds or a tool finishes,
+    // and a dialog owned by one would vanish with it.
+    var toolDetails by remember { mutableStateOf<ToolDetailsRequest?>(null) }
 
     // Needed for "chat finished" notifications; the system stops re-prompting after a denial.
     val askNotifications = rememberLauncherForActivityResult(
@@ -644,7 +647,7 @@ fun ChatScreen(
                                     // Fold once something follows the group (or the run is over).
                                     val folded = index < chatItems.lastIndex ||
                                         (!state.running && state.pendingToolCalls.isEmpty())
-                                    ToolGroupView(item, toolResults, expandedToolIds, folded)
+                                    ToolGroupView(item, toolResults, expandedToolIds, folded) { toolDetails = it }
                                 }
                             }
                         }
@@ -657,7 +660,7 @@ fun ChatScreen(
                             item("pending-tools") {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     for (tc in state.pendingToolCalls.values) {
-                                        ToolCallCard(tc, expandedToolIds)
+                                        ToolCallCard(tc, expandedToolIds) { toolDetails = it }
                                     }
                                 }
                             }
@@ -1117,6 +1120,10 @@ fun ChatScreen(
         }
     }
 
+    toolDetails?.let { d ->
+        ToolDetailsDialog(d.name, d.argsJson, d.result, d.isError, onDismiss = { toolDetails = null })
+    }
+
     viewingImage?.let { bmp ->
         Dialog(
             onDismissRequest = { viewingImage = null },
@@ -1447,17 +1454,26 @@ private fun AssistantBubble(
 }
 
 @Composable
-private fun ToolCallCard(tc: PendingToolUi, expandedIds: MutableMap<String, Boolean>) {
+private fun ToolCallCard(
+    tc: PendingToolUi,
+    expandedIds: MutableMap<String, Boolean>,
+    onDetails: (ToolDetailsRequest) -> Unit,
+) {
     val expanded = expandedIds[tc.id] == true
+    val isError = tc.isError || tc.approved == false
     CompletedToolCard(
         name = tc.name,
         argsJson = tc.argsJson,
         result = tc.result,
-        isError = tc.isError || tc.approved == false,
+        isError = isError,
         expanded = expanded,
         onToggle = { expandedIds[tc.id] = !expanded },
+        onDetails = { onDetails(ToolDetailsRequest(tc.name, tc.argsJson, tc.result, isError)) },
     )
 }
+
+/** Everything the details dialog needs about one tool call. */
+private data class ToolDetailsRequest(val name: String, val argsJson: String, val result: String?, val isError: Boolean)
 
 /** One row in the chat list: a text message, or a run of consecutive tool calls. */
 private sealed interface ChatItem {
@@ -1513,6 +1529,7 @@ private fun ToolGroupView(
     toolResults: Map<String, Block.ToolResult>,
     expandedIds: MutableMap<String, Boolean>,
     folded: Boolean,
+    onDetails: (ToolDetailsRequest) -> Unit,
 ) {
     val groupKey = group.key
     val groupExpanded = expandedIds[groupKey] == true
@@ -1551,6 +1568,7 @@ private fun ToolGroupView(
                     isError = res?.isError == true,
                     expanded = expanded,
                     onToggle = { expandedIds[t.id] = !expanded },
+                    onDetails = { onDetails(ToolDetailsRequest(t.name, t.argsJson, res?.content, res?.isError == true)) },
                 )
             }
         }
@@ -1560,6 +1578,7 @@ private fun ToolGroupView(
 private const val FADED_ALPHA = 0.55f
 
 /** A tool call as a faded single line; tap to expand its arguments and result. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CompletedToolCard(
     name: String,
@@ -1568,13 +1587,14 @@ private fun CompletedToolCard(
     isError: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
+    onDetails: () -> Unit,
 ) {
-    var showDetails by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize()
-            .clickable(onClick = onToggle)
+            // Tap expands; long-press opens the full details without expanding first.
+            .combinedClickable(onClick = onToggle, onLongClick = onDetails)
             .padding(horizontal = 4.dp, vertical = 4.dp),
     ) {
         Row(
@@ -1609,20 +1629,20 @@ private fun CompletedToolCard(
             } else {
                 Spacer(Modifier.weight(1f))
             }
+            IconButton(onClick = onDetails, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Filled.OpenInFull, contentDescription = "Full input & output", modifier = Modifier.size(14.dp))
+            }
         }
         AnimatedVisibility(visible = expanded) {
             Column {
                 ToolExpandedContent(name = name, argsJson = argsJson, result = result, isError = isError)
-                TextButton(onClick = { showDetails = true }, modifier = Modifier.height(32.dp)) {
+                TextButton(onClick = onDetails, modifier = Modifier.height(32.dp)) {
                     Icon(Icons.Filled.OpenInFull, null, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Full input & output", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
-    }
-    if (showDetails) {
-        ToolDetailsDialog(name, argsJson, result, isError, onDismiss = { showDetails = false })
     }
 }
 
