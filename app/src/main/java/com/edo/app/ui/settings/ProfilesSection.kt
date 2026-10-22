@@ -9,8 +9,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.foundation.background
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.edo.app.ui.DragReorderState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,16 +42,29 @@ private fun providerLabel(p: Provider) = when (p) {
     Provider.OpenRouter -> "OpenRouter"
 }
 
-/** Saved model profiles: tap one to switch to it; reorder with the arrows, delete with the trash icon. */
+/** Saved model profiles: tap one to switch to it; reorder by long-press and drag, delete with the trash icon. */
 @Composable
 fun ProfilesSection(
     profiles: List<ModelProfile>,
     activeId: Long,
     onSelect: (ModelProfile) -> Unit,
-    onMove: (ModelProfile, Int) -> Unit,
+    onReorder: (List<ModelProfile>) -> Unit,
     onDelete: (ModelProfile) -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<ModelProfile?>(null) }
+    // Long-press a row and drag to reorder: shown live, saved on drop.
+    var order by remember { mutableStateOf(profiles) }
+    val heights = remember { mutableStateMapOf<Long, Float>() }
+    val haptics = LocalHapticFeedback.current
+    val dragState = remember {
+        DragReorderState<Long>(
+            keys = { order.map { it.id } },
+            heightOf = { heights[it] ?: 0f },
+            onMove = { from, to -> order = order.toMutableList().apply { add(to, removeAt(from)) } },
+            onDrop = { onReorder(order) },
+        )
+    }
+    LaunchedEffect(profiles) { if (dragState.dragging == null) order = profiles }
     Text("Profiles", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
     Spacer(Modifier.height(4.dp))
     if (profiles.isEmpty()) {
@@ -56,9 +74,14 @@ fun ProfilesSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    profiles.forEachIndexed { index, p ->
+    order.forEach { p -> key(p.id) {
+        // Keyed so the row under the finger keeps its gesture while others shift around it.
         Row(
-            modifier = Modifier.fillMaxWidth().clickable { onSelect(p) },
+            modifier = with(dragState) { Modifier.dragged(p.id).dragHandle(p.id, haptics) }
+                .fillMaxWidth()
+                .onSizeChanged { heights[p.id] = it.height.toFloat() }
+                .background(MaterialTheme.colorScheme.surface)
+                .clickable { onSelect(p) },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RadioButton(selected = p.id == activeId, onClick = { onSelect(p) })
@@ -70,17 +93,11 @@ fun ProfilesSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = { onMove(p, -1) }, enabled = index > 0) {
-                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move ${p.name} up")
-            }
-            IconButton(onClick = { onMove(p, 1) }, enabled = index < profiles.lastIndex) {
-                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move ${p.name} down")
-            }
             IconButton(onClick = { pendingDelete = p }) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete ${p.name}")
             }
         }
-    }
+    } }
     pendingDelete?.let { p ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },

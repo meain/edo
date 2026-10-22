@@ -138,14 +138,7 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                     container.settings.save(current)
                     testResult = null
                 },
-                onMove = { p, delta ->
-                    val list = profiles.toMutableList()
-                    val from = list.indexOfFirst { it.id == p.id }
-                    if (from >= 0 && from + delta in list.indices) {
-                        list.add(from + delta, list.removeAt(from))
-                        persistProfiles(list)
-                    }
-                },
+                onReorder = { persistProfiles(it) },
                 onDelete = { p ->
                     persistProfiles(profiles.filterNot { it.id == p.id })
                     if (current.activeProfileId == p.id) {

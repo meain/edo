@@ -13,8 +13,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.edo.app.ui.DragReorderState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -129,6 +132,21 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
     var creating by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<ScheduleEntity?>(null) }
     var expandedId by rememberSaveable { mutableLongStateOf(-1L) }
+
+    // Long-press a card and drag to reorder: the list shows the new order live and saves it on drop.
+    val listState = rememberLazyListState()
+    val haptics = LocalHapticFeedback.current
+    val gapPx = with(LocalDensity.current) { 6.dp.toPx() }
+    var order by remember { mutableStateOf(schedules) }
+    val dragState = remember {
+        DragReorderState<Long>(
+            keys = { order.map { it.id } },
+            heightOf = { id -> listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }?.let { it.size + gapPx } ?: 0f },
+            onMove = { from, to -> order = order.toMutableList().apply { add(to, removeAt(from)) } },
+            onDrop = { scope.launch { container.scheduler.reorder(order.map { it.id }) } },
+        )
+    }
+    LaunchedEffect(schedules) { if (dragState.dragging == null) order = schedules }
     val runningIds by container.scheduler.running.collectAsState()
     // Re-checked on each recomposition so the banner clears after returning from system settings.
     val exactOk = container.scheduler.canScheduleExact()
@@ -207,20 +225,14 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
                 )
             } else {
                 LazyColumn(
+                    state = listState,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(schedules, key = { it.id }) { s ->
-                        val position = schedules.indexOf(s)
+                    items(order, key = { it.id }) { s ->
                         ScheduleCard(
                             container, s,
-                            canMoveUp = position > 0,
-                            canMoveDown = position < schedules.lastIndex,
-                            onMove = { delta ->
-                                val ids = schedules.map { it.id }.toMutableList()
-                                ids.add(position + delta, ids.removeAt(position))
-                                scope.launch { container.scheduler.reorder(ids) }
-                            },
+                            modifier = with(dragState) { Modifier.dragged(s.id, MaterialTheme.shapes.medium).dragHandle(s.id, haptics) },
                             running = s.id in runningIds,
                             expanded = expandedId == s.id,
                             onToggleExpand = { expandedId = if (expandedId == s.id) -1L else s.id },
@@ -300,9 +312,7 @@ private fun statusColor(status: String, enabled: Boolean = true): Color = when {
 private fun ScheduleCard(
     container: AppContainer,
     s: ScheduleEntity,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
-    onMove: (Int) -> Unit,
+    modifier: Modifier,
     running: Boolean,
     expanded: Boolean,
     onToggleExpand: () -> Unit,
@@ -313,7 +323,7 @@ private fun ScheduleCard(
     onDelete: () -> Unit,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = if (s.enabled) MaterialTheme.colorScheme.surfaceContainerHigh
             else MaterialTheme.colorScheme.surfaceContainerLow,
@@ -384,12 +394,6 @@ private fun ScheduleCard(
                             Text("Edit")
                         }
                         Spacer(Modifier.weight(1f))
-                        IconButton(onClick = { onMove(-1) }, enabled = canMoveUp) {
-                            Icon(Icons.Filled.KeyboardArrowUp, "Move up")
-                        }
-                        IconButton(onClick = { onMove(1) }, enabled = canMoveDown) {
-                            Icon(Icons.Filled.KeyboardArrowDown, "Move down")
-                        }
                         IconButton(onClick = onDelete) {
                             Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
                         }
