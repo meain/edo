@@ -46,7 +46,11 @@ class ScheduleManager(private val app: Application, private val container: AppCo
         // The editor and the toggle hand us a copy that may predate a run; lifetime usage is
         // only ever changed by addUsage, so keep whatever the table has.
         val current = if (s.id != 0L) dao.getById(s.id) else null
+        // Same for the list position; a new schedule goes to the end of its project's list.
+        val sortOrder = current?.sortOrder
+            ?: ((dao.listAll().filter { it.projectId == s.projectId }.maxOfOrNull { it.sortOrder } ?: -1) + 1)
         val toSave = s.copy(
+            sortOrder = sortOrder,
             nextRunAt = next, enabled = s.enabled && next > 0,
             totalInputTokens = current?.totalInputTokens ?: 0, totalOutputTokens = current?.totalOutputTokens ?: 0,
             totalCostUsd = current?.totalCostUsd ?: 0.0, totalCostPartial = current?.totalCostPartial ?: false,
@@ -57,7 +61,12 @@ class ScheduleManager(private val app: Application, private val container: AppCo
     }
 
     suspend fun list(projectId: Long): List<ScheduleEntity> =
-        dao.listAll().filter { it.projectId == projectId }.sortedBy { it.createdAt }
+        dao.listAll().filter { it.projectId == projectId }.sortedWith(compareBy({ it.sortOrder }, { it.createdAt }))
+
+    /** Store the list positions for [ids], first to last. */
+    suspend fun reorder(ids: List<Long>) {
+        ids.forEachIndexed { i, id -> dao.setSortOrder(id, i) }
+    }
 
     suspend fun get(id: Long): ScheduleEntity? = dao.getById(id)
 

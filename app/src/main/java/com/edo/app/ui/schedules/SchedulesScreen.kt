@@ -13,6 +13,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -209,8 +211,16 @@ fun SchedulesScreen(container: AppContainer, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     items(schedules, key = { it.id }) { s ->
+                        val position = schedules.indexOf(s)
                         ScheduleCard(
                             container, s,
+                            canMoveUp = position > 0,
+                            canMoveDown = position < schedules.lastIndex,
+                            onMove = { delta ->
+                                val ids = schedules.map { it.id }.toMutableList()
+                                ids.add(position + delta, ids.removeAt(position))
+                                scope.launch { container.scheduler.reorder(ids) }
+                            },
                             running = s.id in runningIds,
                             expanded = expandedId == s.id,
                             onToggleExpand = { expandedId = if (expandedId == s.id) -1L else s.id },
@@ -290,6 +300,9 @@ private fun statusColor(status: String, enabled: Boolean = true): Color = when {
 private fun ScheduleCard(
     container: AppContainer,
     s: ScheduleEntity,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onMove: (Int) -> Unit,
     running: Boolean,
     expanded: Boolean,
     onToggleExpand: () -> Unit,
@@ -371,6 +384,12 @@ private fun ScheduleCard(
                             Text("Edit")
                         }
                         Spacer(Modifier.weight(1f))
+                        IconButton(onClick = { onMove(-1) }, enabled = canMoveUp) {
+                            Icon(Icons.Filled.KeyboardArrowUp, "Move up")
+                        }
+                        IconButton(onClick = { onMove(1) }, enabled = canMoveDown) {
+                            Icon(Icons.Filled.KeyboardArrowDown, "Move down")
+                        }
                         IconButton(onClick = onDelete) {
                             Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
                         }

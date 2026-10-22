@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,12 +37,13 @@ private fun providerLabel(p: Provider) = when (p) {
     Provider.OpenRouter -> "OpenRouter"
 }
 
-/** Saved model profiles: tap one to switch to it; delete with the trash icon. */
+/** Saved model profiles: tap one to switch to it; reorder with the arrows, delete with the trash icon. */
 @Composable
 fun ProfilesSection(
     profiles: List<ModelProfile>,
     activeId: Long,
     onSelect: (ModelProfile) -> Unit,
+    onMove: (ModelProfile, Int) -> Unit,
     onDelete: (ModelProfile) -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<ModelProfile?>(null) }
@@ -53,7 +56,7 @@ fun ProfilesSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    profiles.forEach { p ->
+    profiles.forEachIndexed { index, p ->
         Row(
             modifier = Modifier.fillMaxWidth().clickable { onSelect(p) },
             verticalAlignment = Alignment.CenterVertically,
@@ -66,6 +69,12 @@ fun ProfilesSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            IconButton(onClick = { onMove(p, -1) }, enabled = index > 0) {
+                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move ${p.name} up")
+            }
+            IconButton(onClick = { onMove(p, 1) }, enabled = index < profiles.lastIndex) {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move ${p.name} down")
             }
             IconButton(onClick = { pendingDelete = p }) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete ${p.name}")

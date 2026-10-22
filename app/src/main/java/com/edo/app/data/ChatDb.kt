@@ -208,11 +208,13 @@ data class ScheduleEntity(
     @ColumnInfo(name = "total_output_tokens", defaultValue = "0") val totalOutputTokens: Long = 0,
     @ColumnInfo(name = "total_cost_usd", defaultValue = "0") val totalCostUsd: Double = 0.0,
     @ColumnInfo(name = "total_cost_partial", defaultValue = "0") val totalCostPartial: Boolean = false,
+    /** Position in the project's schedule list; ties fall back to creation order. */
+    @ColumnInfo(name = "sort_order", defaultValue = "0") val sortOrder: Int = 0,
 )
 
 @Dao
 interface ScheduleDao {
-    @Query("SELECT * FROM schedules WHERE project_id = :projectId ORDER BY created_at ASC")
+    @Query("SELECT * FROM schedules WHERE project_id = :projectId ORDER BY sort_order ASC, created_at ASC")
     fun observeForProject(projectId: Long): Flow<List<ScheduleEntity>>
 
     @Query("SELECT * FROM schedules")
@@ -232,6 +234,9 @@ interface ScheduleDao {
 
     @Update
     suspend fun update(s: ScheduleEntity)
+
+    @Query("UPDATE schedules SET sort_order = :order WHERE id = :id")
+    suspend fun setSortOrder(id: Long, order: Int)
 
     @Delete
     suspend fun delete(s: ScheduleEntity)
@@ -327,7 +332,7 @@ interface ScheduleRunDao {
         ProjectEntity::class, ThreadEntity::class, MessageEntity::class, ScheduleEntity::class,
         ScheduleRunEntity::class, UsageEventEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = false,
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -505,13 +510,20 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        /** v15 → v16: let the user reorder a project's schedules. */
+        private val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE schedules ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): ChatDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
                 "edo-chat.db",
             )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }
