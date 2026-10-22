@@ -70,11 +70,12 @@ Threads are scoped to projects, messages to threads. `AppSettings.activeProjectI
 
 - "Compact into new chat" in the chat overflow menu (`ChatSession.compact`, run on the app scope): the chat's own model (not the side-task model) summarises a plain-text transcript (`compactionTranscript`: tool args and results and attached files are cut short), a new thread titled "… (compacted)" opens with that summary as a user message plus a canned assistant acknowledgement, and the UI switches to it. The call's usage is recorded on the old chat.
 - A chat can be compacted at several points, so each compaction is a `compactions` row (v18: `thread_id`, `after_message_id`, `new_thread_id`). `ChatScreen` shows it as an inline "Chat compacted here. Continue in the new chat." line right after that message, so messages sent later appear below it. The new thread's `compacted_from_id` (v18) drives the "Continued from … Open the original" line at the very top of the new chat. `ThreadEntity.compacted_into_id` (v17) is superseded and unused; it stays only so existing databases match the schema.
+- "Open the original" lands on the compaction point rather than the end: the link sets `AppContainer.chatScrollTarget` (thread id + list item key `compacted-<id>`), and `ChatScreen` consumes it once that thread's messages are loaded, turning off tail-following and scrolling to the item. Use the same target for any future link into the middle of a chat.
 - Both are UI-only and never put in the conversation, so the model can't see the links; keep it that way. Deleting a chat deletes its `compactions` rows (`CompactionDao.deleteForThread`).
 
 ## Tool call details
 
-- An expanded tool call has "Full input & output", which opens `ToolDetailsDialog` (near full screen): every argument untruncated in its own section (strings as written, other values as pretty JSON), then the whole output; selectable, with Copy per section. It works for every tool via `toolSections`.
+- Every tool line has an expand icon at its end, long-pressing the line does the same, and an expanded call has a "Full input & output" button. All open `ToolDetailsDialog` (near full screen), whose state is held in `ChatScreen`, not in the tool card: cards leave the list when a group folds or a tool finishes, which used to take the dialog with them. every argument untruncated in its own section (strings as written, other values as pretty JSON), then the whole output; selectable, with Copy per section. It works for every tool via `toolSections`.
 - Lua is highlighted by `luaSpans` / `highlightLua`: the `code` of `run_lua`, and `content` written to a `.lua` path. The expanded `run_lua` card shows a highlighted preview of the first 12 lines.
 
 ## Skills
